@@ -4,6 +4,25 @@ Kept by the agent, reviewed by you. One entry per working block.
 
 ## Decisions
 
+### 2026-07-08 — Slice 4: local OpenCode harness + cron disabled
+
+Switch to running/testing the harness locally with OpenCode; pause CI cron.
+
+- **`scripts/run_local.py`** — the whole pipeline on your machine: gate
+  (deterministic) → `briefing.json` → if the Orange/Red set changed, shell out
+  to `opencode run` (default `opencode-go/kimi-k2.7-code`) to write
+  `dashboard.html`. Mirrors CI but uses OpenCode (Go key), not Claude. `--force`
+  runs the model even with no change; `--model` swaps model; `--fixture` for
+  offline. Tested (`test_run_local.py`) with fake feed + fake opencode: model
+  runs on change, skips when unchanged, `--force` overrides.
+- **Cron disabled** — `schedule:` re-commented in `sitrep.yml`;
+  `workflow_dispatch` kept. Nothing runs on GitHub automatically for now.
+- **CI still wired to Claude** (`claude-code-action`). Swapping the CI model
+  step to OpenCode is a deliberate later change (needs the Go key as a GitHub
+  secret); deferred so the harness is proven locally first.
+- Verified locally end to end: `run_local.py` against the live feed → OpenCode
+  wrote a valid sitrep.
+
 ### 2026-07-08 — Slice 3: the /sitrep model harness
 
 Replaces the deterministic rebuild with a model-written situation report — the

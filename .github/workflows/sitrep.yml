@@ -14,8 +14,10 @@ name: Morning sitrep
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "30 0 * * *"  # 00:30 UTC = 08:30 Asia/Singapore (UTC+8, no DST)
+  # schedule DISABLED for now — the harness is being run and tested locally
+  # (see scripts/run_local.py). Re-enable by uncommenting when ready.
+  # schedule:
+  #   - cron: "30 0 * * *"  # 00:30 UTC = 08:30 Asia/Singapore (UTC+8, no DST)
 
 # Never let two runs race on the commit-back.
 concurrency:
