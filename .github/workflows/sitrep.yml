@@ -1,17 +1,14 @@
 # Morning sitrep — the unattended routine.
 #
 # Shape (ADR: the model never decides whether to wake up):
-#   1. a deterministic script decides whether anything changed;
-#   2. the report is rebuilt and committed ONLY if it did.
+#   1. a deterministic gate decides whether anything changed and writes a
+#      briefing.json (never calls a model);
+#   2. only on change, the /sitrep model reads the briefing and writes the
+#      report; then it is committed.
 #
-# Slice 2 fills step 1 (the change-detection gate) and, in place of the eventual
-# headless-model call, rebuilds the page deterministically. The /sitrep model
-# step replaces the "Rebuild" step in a later slice.
-#
-# The schedule is intentionally left COMMENTED. Enable it (uncomment the two
-# lines) only after you have watched a manual run behave: commit on change, no
-# commit on a quiet run. Until then, run it by hand from the Actions tab
-# (workflow_dispatch).
+# The gate is deterministic and testable; the report is judgement, so it lives
+# in a skill (skills/sitrep) run by the model. The model never decides whether
+# to wake up — the gate does.
 
 name: Morning sitrep
 
@@ -25,9 +22,11 @@ concurrency:
   group: sitrep
   cancel-in-progress: false
 
-# Required so the commit-back can push dashboard.html + state/ to the branch.
+# contents: write so the commit-back can push dashboard.html + state/.
+# id-token: write is used by claude-code-action for the model step.
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   sitrep:
@@ -40,21 +39,33 @@ jobs:
           python-version: "3.11"
 
       # Step 1 — the deterministic gate. Fetches GDACS once, decides whether the
-      # reportable set changed, updates state on change, and saves the fetched
-      # feed for the rebuild step so it doesn't fetch twice. Never calls a model.
+      # reportable set changed, updates state on change, and writes briefing.json
+      # (current reportable events + a corrections diff) for the model. Never
+      # calls a model.
       - id: check
         name: Detect change
         run: |
           python scripts/check_changes.py \
             --update \
-            --snapshot-out "${{ runner.temp }}/feed.json"
+            --snapshot-out "${{ runner.temp }}/feed.json" \
+            --briefing-out briefing.json
 
-      # Step 2 — rebuild the page, only on change, from the snapshot step 1 saved.
-      # (Later slice: replace this with a headless `claude -p` /sitrep call.)
+      # Step 2 — the /sitrep model, only on change. Reads briefing.json and
+      # writes dashboard.html. Tools are restricted to Read/Write/Edit so the
+      # model can only touch files (no git); the commit step below is the single
+      # committer. If this step fails, the run fails loudly and nothing is
+      # committed (see the empty-diff guard) — the intended "something's wrong"
+      # signal.
       - if: steps.check.outputs.changed == 'true'
-        name: Rebuild dashboard
-        run: |
-          python scripts/build_dashboard.py --fixture "${{ runner.temp }}/feed.json"
+        name: Write sitrep (model)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Read skills/sitrep/SKILL.md and follow it exactly: read briefing.json
+            in the repo root and write the morning situation report to
+            dashboard.html. Modify only dashboard.html. Do not commit or push.
+          claude_args: '--allowedTools "Read,Write,Edit"'
 
       # Step 3 — commit dashboard.html + state/, only on change. The empty-diff
       # guard means even a spurious trigger cannot create an empty commit.

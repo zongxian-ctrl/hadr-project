@@ -4,6 +4,30 @@ Kept by the agent, reviewed by you. One entry per working block.
 
 ## Decisions
 
+### 2026-07-08 — Slice 3: the /sitrep model harness
+
+Replaces the deterministic rebuild with a model-written situation report — the
+agent/model harness the PRD's architecture calls for.
+
+- **`scripts/hadr/briefing.py`** — `build_briefing(prev_state, events,
+  change_report, ...)` produces `briefing.json`: the current reportable events
+  plus a corrections diff (before→after for revised, before-only for removed).
+  The deterministic contract the model reads; fully tested (`test_briefing.py`).
+- **The gate writes the briefing** (`check_changes.py --briefing-out`) from
+  `prev_state` *before* it is overwritten, so corrections keep the old
+  fingerprints. The model never re-fetches or re-derives what changed.
+- **`skills/sitrep/SKILL.md`** — reads the briefing, writes `dashboard.html`
+  (what/where/how bad/who-affected per event + Updates & Corrections). "Who is
+  affected" is the model's value-add; it is told not to invent figures.
+- **Workflow** — the model step is `anthropics/claude-code-action@v1` using the
+  existing `CLAUDE_CODE_OAUTH_TOKEN` (no new secret), tools restricted to
+  `Read,Write,Edit` so it can only touch files; the existing commit step stays
+  the single committer. No `if: failure()` fallback: because a stepless `if:`
+  is implicitly `success()`, a failed model step already skips the commit and
+  fails the run loudly (the intended "something's wrong" signal).
+- **Dogfooded locally before any CI run**: generated a live `briefing.json`,
+  ran the skill by hand, eyeballed the `dashboard.html` — good output.
+
 ### 2026-07-08 — Slice 1: GDACS → events → page (walking skeleton)
 
 First vertical slice: fetch one feed, normalise, render a page — end to end.

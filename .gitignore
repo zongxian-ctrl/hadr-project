@@ -2,6 +2,9 @@
 reports/
 *.sitrep.html
 
+# The gate writes this each run as input for the /sitrep model; not a product.
+briefing.json
+
 # dashboard.html is the exception: it is the product, and it is committed.
 !dashboard.html
 
