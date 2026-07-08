@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from hadr.briefing import build_briefing  # noqa: E402
 from hadr.gdacs import fetch_raw, parse_events  # noqa: E402
 from hadr.state import detect_changes, load_state, save_state  # noqa: E402
 
@@ -49,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE, help="State file path.")
     parser.add_argument("--update", action="store_true", help="Persist new state when something changed.")
     parser.add_argument("--snapshot-out", type=Path, help="Write the fetched feed here for the rebuild step.")
+    parser.add_argument("--briefing-out", type=Path, help="Write the briefing JSON here for the /sitrep model step.")
     args = parser.parse_args(argv)
 
     try:
@@ -66,10 +68,19 @@ def main(argv: list[str] | None = None) -> int:
         args.snapshot_out.write_text(json.dumps(raw), encoding="utf-8")
 
     events = parse_events(raw)
-    report = detect_changes(load_state(args.state), events)
+    prev_state = load_state(args.state)
+    report = detect_changes(prev_state, events)
 
     verdict = "CHANGED" if report.has_changes else "UNCHANGED"
     print(f"{verdict}: {report.summary()}")
+
+    # Briefing is built from prev_state (before it is overwritten) so the
+    # corrections diff still has the previous fingerprints.
+    if args.briefing_out:
+        now = datetime.now(timezone.utc)
+        briefing = build_briefing(prev_state, events, report, now)
+        args.briefing_out.parent.mkdir(parents=True, exist_ok=True)
+        args.briefing_out.write_text(json.dumps(briefing, indent=2), encoding="utf-8")
 
     if report.has_changes and args.update:
         save_state(args.state, events, datetime.now(timezone.utc))
