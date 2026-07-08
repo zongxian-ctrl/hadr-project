@@ -13,6 +13,7 @@ defaults rather than raising.
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 from datetime import datetime, timezone
 
@@ -32,11 +33,31 @@ _HAZARD_TYPES = {
 }
 
 
-def fetch_raw(url: str = FEED_URL, timeout: int = 30) -> dict:
-    """Fetch the GDACS event list GeoJSON. Returns the parsed JSON dict."""
+def fetch_raw(
+    url: str = FEED_URL,
+    timeout: int = 20,
+    retries: int = 3,
+    backoff: float = 2.0,
+) -> dict:
+    """Fetch the GDACS event list GeoJSON. Returns the parsed JSON dict.
+
+    GDACS is a free public feed with no SLA and intermittently hangs a
+    connection from datacenter IPs (observed ~30s) while a retry succeeds in
+    ~1s. So each attempt uses a modest timeout and we retry with linear
+    backoff; one transient hang must not sink the morning run. The last
+    exception is re-raised if every attempt fails.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "hadr-monitor/0.1"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:  # timeout, connection reset, malformed body
+            last_exc = exc
+            if attempt < retries:
+                time.sleep(backoff * attempt)
+    raise last_exc  # type: ignore[misc]
 
 
 def _parse_utc(value: str | None) -> datetime | None:
