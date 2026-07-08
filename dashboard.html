@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HADR Monitor — Events (slice 1)</title>
+<style>
+  :root {
+    --bg:#fff; --fg:#1a1d21; --muted:#5b6470; --line:#e3e6ea; --card:#f6f7f9;
+    --red:#c62828; --orange:#d97706; --green:#2e7d32; color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#16181d; --fg:#e8eaed; --muted:#9aa3ad; --line:#2c3038; --card:#1e2127;
+      --red:#ef7070; --orange:#f0a24b; --green:#7cc47f;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
+  h1 { font-size:1.6rem; margin:0 0 .2rem; }
+  .sub { color:var(--muted); font-size:.9rem; margin-bottom:1.8rem; }
+  ul { list-style:none; margin:0; padding:0; }
+  .event { background:var(--card); border:1px solid var(--line);
+    border-left-width:4px; border-radius:8px; padding:.7rem .9rem; margin:.6rem 0; }
+  .event.red    { border-left-color:var(--red); }
+  .event.orange { border-left-color:var(--orange); }
+  .event.green  { border-left-color:var(--green); }
+  .pill { font-size:.72rem; font-weight:700; padding:.05rem .5rem; border-radius:99px;
+    border:1px solid; text-transform:uppercase; }
+  .pill.red    { color:var(--red); border-color:var(--red); }
+  .pill.orange { color:var(--orange); border-color:var(--orange); }
+  .pill.green  { color:var(--green); border-color:var(--green); }
+  .type { color:var(--muted); font-size:.85rem; margin:0 .35rem; }
+  .title { font-weight:600; }
+  .floor { font-size:.7rem; font-weight:700; color:var(--bg); background:var(--fg);
+    padding:.05rem .45rem; border-radius:99px; margin-left:.3rem; }
+  .meta { color:var(--muted); font-size:.82rem; margin-top:.3rem; }
+  .meta a { color:inherit; }
+  .empty { color:var(--muted); padding:1rem 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>HADR Monitor — Events</h1>
+  <p class="sub">Slice 1 · GDACS only · 3 events,
+    2 clear the Orange/Red reporting floor ·
+    generated 2026-07-08 02:44 UTC</p>
+  <ul>
+      <li class="event red">
+        <span class="pill red">Red</span>
+        <span class="type">earthquake</span>
+        <span class="title">Earthquake in Haiti</span>
+        <span class="floor">reportable</span>
+        <div class="meta">Haiti &middot; 2026-07-08 03:15 UTC
+          &middot; score 2.5 &middot; <a href="https://www.gdacs.org/report.aspx?eventid=1234567&amp;eventtype=EQ">details</a></div>
+      </li>
+      <li class="event orange">
+        <span class="pill orange">Orange</span>
+        <span class="type">cyclone</span>
+        <span class="title">Tropical Cyclone MAWAR-26</span>
+        <span class="floor">reportable</span>
+        <div class="meta">Philippines &middot; 2026-07-05 00:00 UTC
+          &middot; score 1.5 &middot; <a href="https://www.gdacs.org/report.aspx?eventid=1000999&amp;eventtype=TC">details</a></div>
+      </li>
+      <li class="event green">
+        <span class="pill green">Green</span>
+        <span class="type">earthquake</span>
+        <span class="title">Earthquake in Japan</span>
+        
+        <div class="meta">Japan &middot; 2026-07-06 11:29 UTC
+          &middot; score 1 &middot; <a href="https://www.gdacs.org/report.aspx?eventid=1550421&amp;episodeid=1716583&amp;eventtype=EQ">details</a></div>
+      </li>
+  </ul>
+</main>
+</body>
+</html>
