@@ -17,8 +17,8 @@ name: Morning sitrep
 
 on:
   workflow_dispatch: {}
-  # schedule:
-  #   - cron: "30 0 * * *"  # 00:30 UTC = 08:30 Asia/Singapore (UTC+8, no DST)
+  schedule:
+    - cron: "30 0 * * *"  # 00:30 UTC = 08:30 Asia/Singapore (UTC+8, no DST)
 
 # Never let two runs race on the commit-back.
 concurrency:
