@@ -27,7 +27,7 @@ any tool-capable `opencode-go/*` model works, e.g. `kimi-k2.7-code`, `glm-5.2`.
 
 Run every level from the **repo root**.
 
-## The five levels
+## The six levels
 
 | Level | File | The one new idea |
 |-------|------|------------------|
@@ -36,6 +36,7 @@ Run every level from the **repo root**.
 | 3 | `level3_one_tool.py` | **One tool.** The model asks for `fetch_feed`, your code runs it, the result goes back as a `tool` message. |
 | 4 | `level4_agent_loop.py` | **The agent loop.** Keep running tools while the model keeps asking. The loop `/goal` wraps a checker around. |
 | 5 | `level5_dashboard.py` | **A second tool.** Add `write_dashboard`; the same loop now chains fetch → assess → write on its own. |
+| 6 | `level6_goal.py` | **A goal checker.** A deterministic check — not the model — decides if the goal is met; if not, it feeds back and retries. This is what `/goal` does. |
 
 Shared plumbing (not the lesson): `llm.py` (the raw HTTP call) and `tools.py`
 (the tool functions + their JSON schemas).
@@ -48,6 +49,8 @@ python harness/level2_system.py               # same, but follows prompt.txt
 python harness/level3_one_tool.py             # one fetch_feed round
 python harness/level4_agent_loop.py           # loops until the model stops asking
 python harness/level5_dashboard.py            # fetch -> assess -> write; makes harness-dashboard.html
+python harness/level6_goal.py                 # agent + deterministic goal check, retries until met
+python harness/level6_goal.py --demo-retry    # force one rejection to watch the retry cycle
 ```
 
 ## How this maps to the real tools
@@ -56,6 +59,11 @@ python harness/level5_dashboard.py            # fetch -> assess -> write; makes 
 - **`fetch_feed` / `write_dashboard` → any tool** (Read, Bash, web fetch…): a
   function the model can request; your code runs it and returns the result.
 - **The Level 4 loop → the agent**: "keep going while it asks for tools" is the
-  core. `/goal` adds a success-check so it runs until the goal is met.
+  core.
+- **The Level 6 checker → `/goal`**: an independent, deterministic check decides
+  "done" (not the model), and loops back with feedback if the goal isn't met.
+  In practice the checker keeps catching the model saying "DONE" when a required
+  event title isn't actually on the page — which is exactly why the decider must
+  be separate from the doer.
 - This project's real pipeline is the same shape: the deterministic gate writes
   a briefing, then a model (via a tool-running harness) writes the report.
