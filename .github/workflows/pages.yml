@@ -1,0 +1,53 @@
+# Publish the aftermath dashboard to GitHub Pages, built with OpenCode.
+#
+# The harness talks to the OpenCode Go gateway directly over HTTPS, so CI needs
+# no `opencode` CLI — just the key. Add it once as a repo secret:
+#     gh secret set OPENCODE_API_KEY        (paste your OpenCode Go key)
+# and enable Pages: Settings → Pages → Source = GitHub Actions.
+#
+# Manual trigger for now (matches "no auto-cron"); uncomment schedule to make
+# the published page refresh itself daily.
+
+name: Publish dashboard (Pages)
+
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "30 0 * * *"   # 08:30 Asia/Singapore
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the dashboard (OpenCode via the harness)
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          python harness/level8_capstone.py
+          mkdir -p _site
+          cp harness-dashboard.html _site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
