@@ -8,6 +8,9 @@ briefing.json
 # Output of the harness tutorial (harness/level5_dashboard.py); not a product.
 harness-dashboard.html
 
+# Generated landing page (harness/level8_capstone.py write_landing); not a product.
+/index.html
+
 # dashboard.html is the exception: it is the product, and it is committed.
 !dashboard.html
 

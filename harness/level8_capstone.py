@@ -224,11 +224,10 @@ def render(events, status):
   .wrap{{max-width:1180px;margin:0 auto;padding:1.75rem 1.25rem 3rem;}}
   h1{{margin:0;font-size:1.5rem;letter-spacing:-.01em;}}
   .sub{{color:var(--muted);font-size:.88rem;margin:.15rem 0 1.25rem;}}
-  .intro{{margin-bottom:1.1rem;}} .tagline{{color:var(--muted);font-size:.98rem;margin:.25rem 0 1rem;max-width:62ch;}}
-  .about{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:.8rem;}}
-  .ab{{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.8rem .95rem;box-shadow:var(--sh);}}
-  .ab h4{{margin:0 0 .35rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}}
-  .ab p{{margin:0;font-size:.88rem;line-height:1.5;}}
+  .topnav{{display:flex;align-items:center;gap:1rem;margin-bottom:.15rem;}}
+  .about-link{{margin-left:auto;font-size:.85rem;color:var(--info);text-decoration:none;
+  border:1px solid var(--line);border-radius:99px;padding:.28rem .8rem;white-space:nowrap;}}
+  .about-link:hover{{border-color:var(--info);}}
   .kpis{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.9rem;margin-bottom:1.1rem;}}
   .kpi{{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:.9rem 1.1rem;box-shadow:var(--sh);}}
   .kpi .n{{font-size:1.9rem;font-weight:700;line-height:1;}} .kpi .l{{color:var(--muted);font-size:.8rem;margin-top:.35rem;}}
@@ -270,25 +269,10 @@ def render(events, status):
   .meta{{color:var(--muted);font-size:.78rem;margin:.15rem 0;}} .assess{{margin:.45rem 0 0;font-size:.9rem;}}
 </style></head><body>
   <div class="wrap">
-    <section class="intro">
+    <div class="topnav">
       <h1>🛰️ HADR Situational Dashboard</h1>
-      <p class="tagline">Turns scattered public disaster feeds into one clear picture of what matters right now.</p>
-      <div class="about">
-        <div class="ab"><h4>What is this?</h4><p>A situational-awareness board for humanitarian &amp; disaster
-          response. It pulls live public feeds, removes duplicates, and shows each significant event on a world
-          map with a NASA satellite view and a plain-language note on who's affected.</p></div>
-        <div class="ab"><h4>Why &amp; where it's headed</h4><p>Responders drown in scattered, duplicated alerts.
-          This distils the noise into what's significant, where it is, and who it hits. Next: more feeds, sharper
-          impact ranking, before/after imagery, and alerts for the most severe events.</p></div>
-        <div class="ab"><h4>Who it's for</h4><p>Duty officers, humanitarian analysts and responders doing a
-          situation scan. It speeds up the first decision of the day — what needs attention now, and where to
-          look first (triage &amp; prioritisation).</p></div>
-        <div class="ab"><h4>What it does <em>not</em> do</h4><p>No forecasting, no tasking or dispatch, no
-          building-level damage (imagery is ~250&nbsp;m — smoke, floods, burn scars, not streets). Not real-time
-          to the second; severity is a modelled alert level, not verified ground truth. Decision support — a
-          human still decides.</p></div>
-      </div>
-    </section>
+      <a class="about-link" href="index.html">About this tool ↗</a>
+    </div>
     <p class="sub">{len(events)} events across {live} live feeds{merged_note} ·
       NASA satellite view per event (GIBS/VIIRS ~250m)</p>
 
@@ -351,6 +335,61 @@ def render(events, status):
     return len(page)
 
 
+LANDING_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HADR Monitor — what it is</title>
+<style>
+  :root{--bg:#eef0f3;--panel:#fff;--fg:#12151a;--muted:#5b6470;--line:#e2e5ea;
+  --accent:#2563eb;--sh:0 1px 3px rgba(0,0,0,.08),0 8px 30px rgba(0,0,0,.06);color-scheme:light dark;}
+  @media(prefers-color-scheme:dark){:root{--bg:#0c0e12;--panel:#161a20;--fg:#e8eaed;--muted:#9aa3ad;
+  --line:#252a32;--accent:#6ea8fe;--sh:0 1px 3px rgba(0,0,0,.4);}}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:880px;margin:0 auto;padding:4rem 1.25rem 4rem;}
+  .hero{text-align:center;margin-bottom:2.5rem;}
+  h1{font-size:2.2rem;letter-spacing:-.02em;margin:0 0 .4rem;}
+  .tagline{color:var(--muted);font-size:1.12rem;max-width:52ch;margin:.4rem auto 1.6rem;}
+  .cta{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;
+  padding:.7rem 1.4rem;border-radius:99px;box-shadow:var(--sh);}
+  .cta:hover{filter:brightness(1.08);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1.2rem 1.3rem;box-shadow:var(--sh);}
+  .card h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 .5rem;}
+  .card p{margin:0;font-size:.97rem;line-height:1.6;}
+  .foot{text-align:center;color:var(--muted);font-size:.82rem;margin-top:2.5rem;}
+</style></head><body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>🛰️ HADR Monitor</h1>
+      <p class="tagline">Turns scattered public disaster feeds into one clear picture of what matters right now.</p>
+      <a class="cta" href="harness-dashboard.html">View the live dashboard →</a>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>What is this?</h2><p>A situational-awareness board for humanitarian &amp; disaster
+        response. It pulls live public feeds, removes duplicates, and shows each significant event on a world map
+        with a NASA satellite view and a plain-language note on who's affected.</p></div>
+      <div class="card"><h2>Why &amp; where it's headed</h2><p>Responders drown in scattered, duplicated alerts.
+        This distils the noise into what's significant, where it is, and who it hits. Next: more feeds, sharper
+        impact ranking, before/after imagery, and alerts for the most severe events.</p></div>
+      <div class="card"><h2>Who it's for</h2><p>Duty officers, humanitarian analysts and responders doing a
+        situation scan. It speeds up the first decision of the day — what needs attention now, and where to look
+        first (triage &amp; prioritisation).</p></div>
+      <div class="card"><h2>What it does <em>not</em> do</h2><p>No forecasting, no tasking or dispatch, no
+        building-level damage (imagery is ~250&nbsp;m — smoke, floods, burn scars, not streets). Not real-time to
+        the second; severity is a modelled alert level, not verified ground truth. Decision support — a human
+        still decides.</p></div>
+    </div>
+    <p class="foot">Free feeds: GDACS · USGS · NASA EONET · US NWS · imagery NASA GIBS. Decision support, not a decision-maker.</p>
+  </div>
+</body></html>
+"""
+
+
+def write_landing():
+    Path("index.html").write_text(LANDING_HTML, encoding="utf-8")
+
+
 def main():
     print("1/5 gathering (GDACS + USGS + EONET + NWS) …")
     events, status = gather()
@@ -368,7 +407,8 @@ def main():
     events = assess(events)
     print("4/5 imagery + 5/5 rendering …")
     size = render(events, status)
-    print(f"Done → {DASHBOARD_PATH} ({size // 1024} KB).")
+    write_landing()
+    print(f"Done → index.html (landing) + {DASHBOARD_PATH} ({size // 1024} KB).")
     return 0
 
 

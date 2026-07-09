@@ -43,7 +43,7 @@ jobs:
         run: |
           python harness/level8_capstone.py
           mkdir -p _site
-          cp harness-dashboard.html _site/index.html
+          cp index.html harness-dashboard.html _site/    # index.html = landing, dashboard alongside
 
       - uses: actions/upload-pages-artifact@v3
         with:
