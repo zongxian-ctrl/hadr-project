@@ -3,14 +3,16 @@
 Ties the whole harness together and runs end to end, automatically:
 
   1. GATHER (deterministic): pull significant events from GDACS + USGS + EONET
-     into one list with coordinates and dates.
-  2. SEE (deterministic): fetch a NASA aftermath satellite image per event
-     (GIBS/WorldView, embedded as a self-contained data: URI).
+     into one list with coordinates and dates; record which sources answered.
+  2. SEE (deterministic): fetch a NASA true-color satellite image per event
+     (GIBS/WorldView, embedded as a self-contained data: URI), PLUS a second
+     image with NASA's fire-detection overlay — a page toggle swaps between them.
   3. ASSESS (model): one call to write a 'who is affected' line per event.
-  4. RENDER (deterministic): a polished, self-contained HTML dashboard.
+  4. RENDER (deterministic): a polished, self-contained HTML dashboard, with a
+     feed-status line so a silent feed failure is visible (not just "fewer events").
 
-This is the same split the real project uses: deterministic gather + render on
-the outside, the model only for judgement in the middle. Reliable *and* smart.
+Deterministic gather+render on the outside, the model only for judgement in the
+middle — the same architecture as the real project. Reliable *and* smart.
 
 Run:  python harness/level8_capstone.py
 Produces: harness-dashboard.html
@@ -18,11 +20,13 @@ Produces: harness-dashboard.html
 
 import html as html_mod
 import json
-import sys
+from pathlib import Path
 
 from llm import call_model
 from tools import (
     DASHBOARD_PATH,
+    FIRE_LAYER,
+    TRUECOLOR,
     fetch_eonet,
     fetch_feed,
     fetch_usgs,
@@ -33,23 +37,37 @@ MAX_EVENTS = 8
 
 
 def gather():
-    """Deterministically pull significant events (with coords + date) from all sources."""
-    events = []
-    for e in json.loads(fetch_feed()).get("events", []):
-        c = e.get("coords") or [None, None]
-        events.append({"source": "GDACS", "title": e["title"], "severity": e.get("alert"),
-                       "where": e.get("country"), "lon": c[0], "lat": c[1], "date": e.get("date")})
-    for e in json.loads(fetch_usgs(5.0, "day")).get("events", [])[:3]:
-        c = e.get("coords") or [None, None]
-        events.append({"source": "USGS", "title": f"M{e['mag']} — {e['place']}",
-                       "severity": f"M{e['mag']}", "where": e.get("place"),
-                       "lon": c[0], "lat": c[1], "date": e.get("time")})
-    for e in json.loads(fetch_eonet("wildfires", 8)).get("events", [])[:3]:
-        c = e.get("coords") or [None, None]
-        events.append({"source": "EONET", "title": e["title"], "severity": e.get("category"),
-                       "where": None, "lon": c[0], "lat": c[1], "date": e.get("date")})
-    events = [e for e in events if e["lat"] is not None and e["lon"] is not None]
-    return events[:MAX_EVENTS]
+    """Deterministically pull significant events (with coords + date) from all
+    sources. Returns (events, status) where status[source] is a count or 'unreachable'."""
+    events, status = [], {}
+
+    def add(source, raw, mapper, cap):
+        d = json.loads(raw)
+        if "error" in d:
+            status[source] = "unreachable"
+            return
+        picked = [mapper(e) for e in d.get("events", [])[:cap]]
+        picked = [e for e in picked if e["lat"] is not None and e["lon"] is not None]
+        events.extend(picked)
+        status[source] = len(picked)
+
+    add("GDACS", fetch_feed(), lambda e: {
+        "source": "GDACS", "title": e["title"], "severity": e.get("alert"),
+        "where": e.get("country"),
+        "lon": (e.get("coords") or [None, None])[0],
+        "lat": (e.get("coords") or [None, None])[1], "date": e.get("date")}, 99)
+    add("USGS", fetch_usgs(5.0, "day"), lambda e: {
+        "source": "USGS", "title": f"M{e['mag']} — {e['place']}",
+        "severity": f"M{e['mag']}", "where": e.get("place"),
+        "lon": (e.get("coords") or [None, None])[0],
+        "lat": (e.get("coords") or [None, None])[1], "date": e.get("time")}, 3)
+    add("EONET", fetch_eonet("wildfires", 8), lambda e: {
+        "source": "EONET", "title": e["title"], "severity": e.get("category"),
+        "where": None,
+        "lon": (e.get("coords") or [None, None])[0],
+        "lat": (e.get("coords") or [None, None])[1], "date": e.get("date")}, 3)
+
+    return events[:MAX_EVENTS], status
 
 
 def assess(events):
@@ -69,15 +87,20 @@ def assess(events):
     return events
 
 
-def render(events):
-    """Deterministic polished UI (fixed template, self-contained). Guarantees 'nice'."""
+def render(events, status):
+    """Deterministic polished UI (fixed template, self-contained)."""
     esc = html_mod.escape
     sev_class = {"Red": "red", "Orange": "orange"}
     cards = []
     for e in events:
-        img = snapshot_data_uri(e["lat"], e["lon"], e.get("date") or "")
-        img_html = (f'<img src="{img}" alt="satellite view" loading="lazy">' if img
-                    else '<div class="noimg">imagery unavailable</div>')
+        plain = snapshot_data_uri(e["lat"], e["lon"], e.get("date") or "", layers=TRUECOLOR)
+        fire = snapshot_data_uri(e["lat"], e["lon"], e.get("date") or "",
+                                 layers=f"{TRUECOLOR},{FIRE_LAYER}") or plain
+        if plain:
+            img_html = (f'<img class="sat" src="{plain}" data-plain="{plain}" '
+                        f'data-fire="{fire}" alt="satellite view" loading="lazy">')
+        else:
+            img_html = '<div class="noimg">imagery unavailable</div>'
         sev = e.get("severity") or ""
         cls = sev_class.get(sev, "usgs" if e["source"] == "USGS" else "eonet")
         when = (e.get("date") or "")[:10]
@@ -93,10 +116,11 @@ def render(events):
       </div>
     </article>""")
 
-    counts = {}
-    for e in events:
-        counts[e["source"]] = counts.get(e["source"], 0) + 1
-    summary = " · ".join(f"{v} {k}" for k, v in counts.items()) or "no events"
+    status_bits = []
+    for src in ("GDACS", "USGS", "EONET"):
+        v = status.get(src, "—")
+        status_bits.append(f'<span class="{"down" if v == "unreachable" else "ok"}">{src}: {v}</span>')
+    status_line = " · ".join(status_bits)
 
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -104,13 +128,19 @@ def render(events):
 <title>HADR Aftermath Dashboard</title>
 <style>
   :root{{--bg:#f4f5f7;--fg:#1a1d21;--card:#fff;--muted:#5b6470;--line:#e3e6ea;
-  --red:#c62828;--orange:#d97706;--usgs:#2563eb;--eonet:#b45309;color-scheme:light dark;}}
+  --red:#c62828;--orange:#d97706;--usgs:#2563eb;--eonet:#b45309;--ok:#2e7d32;--down:#c62828;
+  color-scheme:light dark;}}
   @media(prefers-color-scheme:dark){{:root{{--bg:#0f1115;--fg:#e8eaed;--card:#1a1d23;
-  --muted:#9aa3ad;--line:#2c3038;--red:#ef7070;--orange:#f0a24b;--usgs:#6ea8fe;--eonet:#f0b357;}}}}
+  --muted:#9aa3ad;--line:#2c3038;--red:#ef7070;--orange:#f0a24b;--usgs:#6ea8fe;--eonet:#f0b357;
+  --ok:#7cc47f;--down:#ef7070;}}}}
   *{{box-sizing:border-box;}} body{{margin:0;background:var(--bg);color:var(--fg);
   font:16px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}}
   header{{max-width:1100px;margin:0 auto;padding:2rem 1.25rem .5rem;}}
   h1{{margin:0 0 .2rem;font-size:1.6rem;}} .sub{{color:var(--muted);font-size:.9rem;}}
+  .bar{{max-width:1100px;margin:.4rem auto 0;padding:0 1.25rem;display:flex;gap:1.2rem;
+  align-items:center;flex-wrap:wrap;font-size:.82rem;color:var(--muted);}}
+  .bar .ok{{color:var(--ok);}} .bar .down{{color:var(--down);font-weight:700;}}
+  .toggle{{margin-left:auto;color:var(--fg);cursor:pointer;user-select:none;}}
   .grid{{max-width:1100px;margin:1rem auto;padding:0 1.25rem 3rem;display:grid;
   grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1.1rem;}}
   .card{{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--muted);
@@ -130,31 +160,42 @@ def render(events):
 </style></head><body>
   <header>
     <h1>🛰️ HADR Aftermath Dashboard</h1>
-    <p class="sub">{len(events)} significant events ({summary}) · each with a NASA
-      satellite view (GIBS/VIIRS ~250m: smoke, fire hotspots, flood extent, burn scars)</p>
+    <p class="sub">{len(events)} significant events · each with a NASA true-color
+      satellite view (GIBS/VIIRS ~250m: smoke, flood extent, burn scars)</p>
   </header>
+  <div class="bar">
+    <span>feeds:</span> {status_line}
+    <label class="toggle"><input type="checkbox" id="fire" onchange="toggleFire(this.checked)">
+      Show NASA fire detections</label>
+  </div>
   <main class="grid">
 {chr(10).join(cards)}
   </main>
+  <script>
+    function toggleFire(on) {{
+      document.querySelectorAll('img.sat').forEach(function(i) {{
+        i.src = on ? i.dataset.fire : i.dataset.plain;
+      }});
+    }}
+  </script>
 </body></html>
 """
-    from pathlib import Path
     Path(DASHBOARD_PATH).write_text(page, encoding="utf-8")
     return len(page)
 
 
 def main():
     print("1/4 gathering events from GDACS + USGS + EONET …")
-    events = gather()
-    print(f"    {len(events)} events with coordinates.")
+    events, status = gather()
+    print(f"    feeds: {status}")
     if not events:
         print("No located events right now; nothing to render.")
         return 0
     print("2/4 assessing (model: who is affected) …")
     events = assess(events)
-    print("3/4 fetching aftermath satellite imagery + 4/4 rendering …")
-    size = render(events)
-    print(f"Done → {DASHBOARD_PATH} ({size // 1024} KB, images embedded).")
+    print("3/4 fetching aftermath imagery (true-color + fire overlay) + 4/4 rendering …")
+    size = render(events, status)
+    print(f"Done → {DASHBOARD_PATH} ({size // 1024} KB). Toggle fire detections in the page.")
     return 0
 
 

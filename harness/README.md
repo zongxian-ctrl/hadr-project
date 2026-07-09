@@ -8,20 +8,12 @@ SDK — so every part is visible. It talks to the **OpenCode Go** gateway
 Everything a big tool (Claude Code, OpenCode) does is these five ideas plus
 polish: a system prompt, a `messages` array, some tools, and a loop.
 
-## Setup (once per terminal)
+## Setup
 
-The harness reads your key from `OPENCODE_API_KEY`. Load it from your OpenCode
-login **without printing it**:
+**None, if you've signed in to OpenCode** (`opencode auth login`). The harness
+auto-reads your key from OpenCode's stored config, so it just runs.
 
-PowerShell:
-```powershell
-$env:OPENCODE_API_KEY = (python -c "import json,os;print(json.load(open(os.path.expanduser('~/.local/share/opencode/auth.json')))['opencode-go']['key'])")
-```
-Bash:
-```bash
-export OPENCODE_API_KEY=$(python -c "import json,os;print(json.load(open(os.path.expanduser('~/.local/share/opencode/auth.json')))['opencode-go']['key'])")
-```
-
+To override the key or use it elsewhere, set `OPENCODE_API_KEY` yourself.
 Optional: pick a different model with `HARNESS_MODEL` (default `qwen3.7-max`);
 any tool-capable `opencode-go/*` model works, e.g. `kimi-k2.7-code`, `glm-5.2`.
 
@@ -38,7 +30,7 @@ Run every level from the **repo root**.
 | 5 | `level5_dashboard.py` | **A second tool.** Add `write_dashboard`; the same loop now chains fetch → assess → write on its own. |
 | 6 | `level6_goal.py` | **A goal checker.** A deterministic check — not the model — decides if the goal is met; if not, it feeds back and retries. This is what `/goal` does. |
 | 7 | `level7_multisource.py` | **Many tools, with arguments.** Four data sources (GDACS, USGS, ReliefWeb, EONET); the model chooses *which* to call and *with what arguments*. Same loop — a bigger toolbox. |
-| 8 | `level8_capstone.py` | **The capstone.** Gather all sources → fetch a NASA aftermath satellite image per event → model assesses each → render a polished self-contained UI. Deterministic gather+render, model only for judgement. |
+| 8 | `level8_capstone.py` | **The capstone.** Gather all sources → fetch a NASA aftermath satellite image per event → model assesses each → render a polished self-contained UI with a feed-status line and a **"show NASA fire detections" toggle**. Deterministic gather+render, model only for judgement. |
 
 ### The sources (`tools.py`)
 
