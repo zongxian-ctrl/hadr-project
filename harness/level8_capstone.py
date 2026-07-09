@@ -224,6 +224,11 @@ def render(events, status):
   .wrap{{max-width:1180px;margin:0 auto;padding:1.75rem 1.25rem 3rem;}}
   h1{{margin:0;font-size:1.5rem;letter-spacing:-.01em;}}
   .sub{{color:var(--muted);font-size:.88rem;margin:.15rem 0 1.25rem;}}
+  .intro{{margin-bottom:1.1rem;}} .tagline{{color:var(--muted);font-size:.98rem;margin:.25rem 0 1rem;max-width:62ch;}}
+  .about{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:.8rem;}}
+  .ab{{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.8rem .95rem;box-shadow:var(--sh);}}
+  .ab h4{{margin:0 0 .35rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}}
+  .ab p{{margin:0;font-size:.88rem;line-height:1.5;}}
   .kpis{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.9rem;margin-bottom:1.1rem;}}
   .kpi{{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:.9rem 1.1rem;box-shadow:var(--sh);}}
   .kpi .n{{font-size:1.9rem;font-weight:700;line-height:1;}} .kpi .l{{color:var(--muted);font-size:.8rem;margin-top:.35rem;}}
@@ -265,7 +270,25 @@ def render(events, status):
   .meta{{color:var(--muted);font-size:.78rem;margin:.15rem 0;}} .assess{{margin:.45rem 0 0;font-size:.9rem;}}
 </style></head><body>
   <div class="wrap">
-    <h1>🛰️ HADR Situational Dashboard</h1>
+    <section class="intro">
+      <h1>🛰️ HADR Situational Dashboard</h1>
+      <p class="tagline">Turns scattered public disaster feeds into one clear picture of what matters right now.</p>
+      <div class="about">
+        <div class="ab"><h4>What is this?</h4><p>A situational-awareness board for humanitarian &amp; disaster
+          response. It pulls live public feeds, removes duplicates, and shows each significant event on a world
+          map with a NASA satellite view and a plain-language note on who's affected.</p></div>
+        <div class="ab"><h4>Why &amp; where it's headed</h4><p>Responders drown in scattered, duplicated alerts.
+          This distils the noise into what's significant, where it is, and who it hits. Next: more feeds, sharper
+          impact ranking, before/after imagery, and alerts for the most severe events.</p></div>
+        <div class="ab"><h4>Who it's for</h4><p>Duty officers, humanitarian analysts and responders doing a
+          situation scan. It speeds up the first decision of the day — what needs attention now, and where to
+          look first (triage &amp; prioritisation).</p></div>
+        <div class="ab"><h4>What it does <em>not</em> do</h4><p>No forecasting, no tasking or dispatch, no
+          building-level damage (imagery is ~250&nbsp;m — smoke, floods, burn scars, not streets). Not real-time
+          to the second; severity is a modelled alert level, not verified ground truth. Decision support — a
+          human still decides.</p></div>
+      </div>
+    </section>
     <p class="sub">{len(events)} events across {live} live feeds{merged_note} ·
       NASA satellite view per event (GIBS/VIIRS ~250m)</p>
 
