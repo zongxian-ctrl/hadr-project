@@ -27,7 +27,7 @@ any tool-capable `opencode-go/*` model works, e.g. `kimi-k2.7-code`, `glm-5.2`.
 
 Run every level from the **repo root**.
 
-## The six levels
+## The seven levels
 
 | Level | File | The one new idea |
 |-------|------|------------------|
@@ -37,6 +37,16 @@ Run every level from the **repo root**.
 | 4 | `level4_agent_loop.py` | **The agent loop.** Keep running tools while the model keeps asking. The loop `/goal` wraps a checker around. |
 | 5 | `level5_dashboard.py` | **A second tool.** Add `write_dashboard`; the same loop now chains fetch → assess → write on its own. |
 | 6 | `level6_goal.py` | **A goal checker.** A deterministic check — not the model — decides if the goal is met; if not, it feeds back and retries. This is what `/goal` does. |
+| 7 | `level7_multisource.py` | **Many tools, with arguments.** Four data sources (GDACS, USGS, ReliefWeb, EONET); the model chooses *which* to call and *with what arguments*. Same loop — a bigger toolbox. |
+
+### The sources (`tools.py`)
+
+| Tool | Source | Arguments | Note |
+|------|--------|-----------|------|
+| `fetch_feed` | GDACS | — | The only source with alert levels (Orange/Red). |
+| `fetch_usgs` | USGS earthquakes | `min_magnitude`, `window` | Magnitude + time window. |
+| `fetch_reliefweb` | ReliefWeb RSS | `limit` | Curated, slower, no severity. |
+| `fetch_eonet` | NASA EONET | `category`, `limit` | Natural-events catalog; no severity. |
 
 Shared plumbing (not the lesson): `llm.py` (the raw HTTP call) and `tools.py`
 (the tool functions + their JSON schemas).
@@ -52,6 +62,8 @@ python harness/level5_dashboard.py            # fetch -> assess -> write; makes 
 python harness/level6_goal.py --selftest      # prove the checker itself (no API key needed)
 python harness/level6_goal.py                 # full loop: shared snapshot + deterministic gate
 python harness/level6_goal.py --judge         # also run a SEPARATE-model judge for the prose
+python harness/level7_multisource.py          # agent picks among GDACS/USGS/ReliefWeb/EONET
+python harness/level7_multisource.py "strongest quakes today and any active volcanoes"
 ```
 
 ## How this maps to the real tools
