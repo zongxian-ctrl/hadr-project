@@ -150,16 +150,22 @@ def fetch_eonet(category=None, limit=10):
 
 # ---- satellite imagery: NASA GIBS via the WorldView snapshot API -------------
 # EONET/GDACS/USGS give WHERE + WHEN; GIBS gives the picture. Resolution is
-# ~250m-1km (MODIS/VIIRS): good for smoke plumes, flood extent, burn scars and
-# fire hotspots — NOT building-level damage.
+# ~250m-1km (MODIS/VIIRS): good for smoke plumes, flood extent, burn scars —
+# NOT building-level damage.
+#
+# Default is TRUE COLOR — the raw daily image the satellite saw, no overlays.
+# FIRE_LAYER (thermal-anomaly "red dots") is available but OFF by default; pass
+# it explicitly via `layers=` only if you want that overlay.
 
-TRUECOLOR = "VIIRS_SNPP_CorrectedReflectance_TrueColor"
-FIRE_LAYER = "VIIRS_SNPP_Thermal_Anomalies_375m_All"
+TRUECOLOR = "VIIRS_SNPP_CorrectedReflectance_TrueColor"   # natural color, daily
+FALSECOLOR_BURN = "VIIRS_SNPP_CorrectedReflectance_BandsM11-I2-I1"  # real bands; burn scars/smoke pop
+FIRE_LAYER = "VIIRS_SNPP_Thermal_Anomalies_375m_All"     # optional overlay (the red dots)
 
 
 def snapshot_url(lat, lon, date, span=1.0, layers=None, width=512, height=512):
-    """Build a WorldView/GIBS snapshot image URL for a place + date (no download)."""
-    layers = layers or f"{TRUECOLOR},{FIRE_LAYER}"
+    """Build a WorldView/GIBS snapshot image URL for a place + date (no download).
+    Defaults to true color (no overlays) — what the satellite actually saw."""
+    layers = layers or TRUECOLOR
     bbox = f"{lat - span},{lon - span},{lat + span},{lon + span}"  # EPSG:4326 = lat,lon
     q = urlencode({
         "REQUEST": "GetSnapshot", "LAYERS": layers, "CRS": "EPSG:4326",
