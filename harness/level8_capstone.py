@@ -29,7 +29,15 @@ from tools import (
     fetch_eonet, fetch_feed, fetch_nws, fetch_usgs, snapshot_data_uri,
 )
 
-MAX_EVENTS = 10
+# ---- how much to fetch (tune these) -----------------------------------------
+MAX_EVENTS = 30           # total events shown after de-duplication; raise for more
+USGS_MIN_MAG = 5.0        # earthquakes at/above this magnitude…
+USGS_WINDOW = "day"       # …within: "hour" | "day" | "week"  (week = many more)
+NWS_MIN_SEV = "Severe"    # "Extreme" | "Severe" | "Moderate" | "Minor" (lower = more)
+FEED_CAPS = {"GDACS": 99, "USGS": 6, "EONET": 5, "NWS": 4}   # per-feed maximum
+# NOTE: GDACS is fixed to Orange/Red inside fetch_feed (Green is mostly noise);
+# broaden EONET by category count via FEED_CAPS["EONET"].
+# -----------------------------------------------------------------------------
 WORLD_PATH = (Path(__file__).parent / "assets" / "world_path.txt").read_text(encoding="utf-8")
 SEV_RANK = {"red": 0, "orange": 1, "info": 2}
 GDACS_HAZARD = {"EQ": "earthquake", "TC": "cyclone", "FL": "flood",
@@ -70,31 +78,37 @@ def gather():
         return {"source": "GDACS", "title": e["title"], "severity": e.get("alert"),
                 "sev_level": "red" if e.get("alert") == "Red" else "orange",
                 "hazard": GDACS_HAZARD.get(e.get("type"), (e.get("type") or "").lower()),
-                "where": e.get("country"), "lon": c[0], "lat": c[1], "date": e.get("date")}
+                "where": e.get("country"), "lon": c[0], "lat": c[1], "date": e.get("date"),
+                "url": e.get("url"), "detail": None}
 
     def us(e):
         c = e.get("coords") or [None, None]
         mag = e.get("mag") or 0
+        depth = e.get("depth")
         return {"source": "USGS", "title": f"M{mag} — {e['place']}", "severity": f"M{mag}",
                 "sev_level": "red" if mag >= 6 else "orange", "hazard": "earthquake",
-                "where": e.get("place"), "lon": c[0], "lat": c[1], "date": e.get("time")}
+                "where": e.get("place"), "lon": c[0], "lat": c[1], "date": e.get("time"),
+                "url": e.get("url"),
+                "detail": f"Depth {depth:.0f} km" if depth is not None else None}
 
     def eo(e):
         c = e.get("coords") or [None, None]
         return {"source": "EONET", "title": e["title"], "severity": e.get("category"),
                 "sev_level": "info", "hazard": _norm_eonet_hazard(e.get("category")),
-                "where": e.get("category"), "lon": c[0], "lat": c[1], "date": e.get("date")}
+                "where": e.get("category"), "lon": c[0], "lat": c[1], "date": e.get("date"),
+                "url": e.get("url"), "detail": None}
 
     def nw(e):
         return {"source": "NWS", "title": e.get("event"), "severity": e.get("severity"),
                 "sev_level": "red" if e.get("severity") == "Extreme" else "orange",
                 "hazard": "weather", "where": e.get("area"),
-                "lon": e.get("lon"), "lat": e.get("lat"), "date": e.get("date")}
+                "lon": e.get("lon"), "lat": e.get("lat"), "date": e.get("date"),
+                "url": None, "detail": e.get("headline")}
 
-    add("GDACS", fetch_feed(), gd, 99)
-    add("USGS", fetch_usgs(5.0, "day"), us, 6)
-    add("EONET", fetch_eonet(None, 20), eo, 5)
-    add("NWS", fetch_nws("Severe", 20), nw, 4)
+    add("GDACS", fetch_feed(), gd, FEED_CAPS["GDACS"])
+    add("USGS", fetch_usgs(USGS_MIN_MAG, USGS_WINDOW), us, FEED_CAPS["USGS"])
+    add("EONET", fetch_eonet(None, 20), eo, FEED_CAPS["EONET"])
+    add("NWS", fetch_nws(NWS_MIN_SEV, 20), nw, FEED_CAPS["NWS"])
     return events, status
 
 
@@ -172,15 +186,16 @@ def render(events, status):
     merged_ct = sum(1 for e in events if len(e["sources"]) > 1)
 
     dots = []
-    for e in events:
+    for i, e in enumerate(events):
         x, y = _proj(e["lat"], e["lon"])
         srcs = ",".join(e["sources"])
         sub = f"{'+'.join(e['sources'])} · {e.get('severity') or ''} · {(e.get('where') or '')} · {(e.get('date') or '')[:10]}"
         dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5.5" class="dot {e["sev_level"]}" '
-                    f'data-source="{esc(srcs)}" data-title="{esc(e["title"])}" data-sub="{esc(sub)}"/>')
+                    f'data-source="{esc(srcs)}" data-title="{esc(e["title"])}" data-sub="{esc(sub)}" '
+                    f'onclick="jump({i})"/>')
 
     cards = []
-    for e in events:
+    for i, e in enumerate(events):
         plain = snapshot_data_uri(e["lat"], e["lon"], e.get("date") or "", layers=TRUECOLOR)
         fire = snapshot_data_uri(e["lat"], e["lon"], e.get("date") or "",
                                  layers=f"{TRUECOLOR},{FIRE_LAYER}") or plain
@@ -190,7 +205,10 @@ def render(events, status):
         when = (e.get("date") or "")[:10]
         src_badges = "".join(f'<span class="src">{esc(s)}</span>' for s in e["sources"])
         merged_tag = '<span class="merged">merged</span>' if len(e["sources"]) > 1 else ""
-        cards.append(f"""    <article class="card {e['sev_level']}" data-source="{esc(','.join(e['sources']))}">
+        detail_html = f'<p class="detail">{esc(e["detail"])}</p>' if e.get("detail") else ""
+        link_html = (f'<a class="srclink" href="{esc(e["url"])}" target="_blank" rel="noopener">Full record ↗</a>'
+                     if e.get("url") else "")
+        cards.append(f"""    <article id="ev{i}" class="card {e['sev_level']}" data-source="{esc(','.join(e['sources']))}">
       {img}
       <div class="body">
         <div class="row"><span class="badge {e['sev_level']}">{esc(str(e.get('severity') or ''))}</span>
@@ -198,6 +216,8 @@ def render(events, status):
         <h3>{esc(e['title'])}</h3>
         <p class="meta">{esc(e.get('where') or '')}{' · ' if e.get('where') else ''}{esc(when)}</p>
         <p class="assess">{esc(e.get('assessment') or '')}</p>
+        {detail_html}
+        {link_html}
       </div>
     </article>""")
 
@@ -224,6 +244,10 @@ def render(events, status):
   .wrap{{max-width:1180px;margin:0 auto;padding:1.75rem 1.25rem 3rem;}}
   h1{{margin:0;font-size:1.5rem;letter-spacing:-.01em;}}
   .sub{{color:var(--muted);font-size:.88rem;margin:.15rem 0 1.25rem;}}
+  .topnav{{display:flex;align-items:center;gap:1rem;margin-bottom:.15rem;}}
+  .about-link{{margin-left:auto;font-size:.85rem;color:var(--info);text-decoration:none;
+  border:1px solid var(--line);border-radius:99px;padding:.28rem .8rem;white-space:nowrap;}}
+  .about-link:hover{{border-color:var(--info);}}
   .kpis{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.9rem;margin-bottom:1.1rem;}}
   .kpi{{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:.9rem 1.1rem;box-shadow:var(--sh);}}
   .kpi .n{{font-size:1.9rem;font-weight:700;line-height:1;}} .kpi .l{{color:var(--muted);font-size:.8rem;margin-top:.35rem;}}
@@ -263,9 +287,17 @@ def render(events, status):
   .src{{color:var(--muted);font-size:.72rem;border:1px solid var(--line);border-radius:99px;padding:.02rem .4rem;}}
   h3{{font-size:1rem;margin:.15rem 0 .3rem;}}
   .meta{{color:var(--muted);font-size:.78rem;margin:.15rem 0;}} .assess{{margin:.45rem 0 0;font-size:.9rem;}}
+  .detail{{color:var(--muted);font-size:.8rem;margin:.35rem 0 0;}}
+  .srclink{{display:inline-block;margin-top:.5rem;font-size:.8rem;color:var(--info);text-decoration:none;}}
+  .srclink:hover{{text-decoration:underline;}}
+  .card.flash{{animation:flash 1.2s ease;}}
+  @keyframes flash{{0%,100%{{box-shadow:var(--sh);}}25%{{box-shadow:0 0 0 3px var(--info);}}}}
 </style></head><body>
   <div class="wrap">
-    <h1>🛰️ HADR Situational Dashboard</h1>
+    <div class="topnav">
+      <h1>🛰️ HADR Situational Dashboard</h1>
+      <a class="about-link" href="index.html">About this tool ↗</a>
+    </div>
     <p class="sub">{len(events)} events across {live} live feeds{merged_note} ·
       NASA satellite view per event (GIBS/VIIRS ~250m)</p>
 
@@ -303,6 +335,10 @@ def render(events, status):
   <div id="tip" class="tip"></div>
   <script>
     function fire(on){{document.querySelectorAll('img.sat').forEach(i=>i.src=on?i.dataset.fire:i.dataset.plain);}}
+    function jump(i){{var c=document.getElementById('ev'+i);if(!c)return;
+      c.classList.remove('hide');
+      c.scrollIntoView({{behavior:'smooth',block:'center'}});
+      c.classList.add('flash');setTimeout(function(){{c.classList.remove('flash');}},1200);}}
     function match(el,f){{return f==='All'||el.dataset.source.split(',').indexOf(f)>=0;}}
     function filt(btn){{
       var f=btn.dataset.f;
@@ -328,6 +364,61 @@ def render(events, status):
     return len(page)
 
 
+LANDING_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HADR Monitor — what it is</title>
+<style>
+  :root{--bg:#eef0f3;--panel:#fff;--fg:#12151a;--muted:#5b6470;--line:#e2e5ea;
+  --accent:#2563eb;--sh:0 1px 3px rgba(0,0,0,.08),0 8px 30px rgba(0,0,0,.06);color-scheme:light dark;}
+  @media(prefers-color-scheme:dark){:root{--bg:#0c0e12;--panel:#161a20;--fg:#e8eaed;--muted:#9aa3ad;
+  --line:#252a32;--accent:#6ea8fe;--sh:0 1px 3px rgba(0,0,0,.4);}}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:880px;margin:0 auto;padding:4rem 1.25rem 4rem;}
+  .hero{text-align:center;margin-bottom:2.5rem;}
+  h1{font-size:2.2rem;letter-spacing:-.02em;margin:0 0 .4rem;}
+  .tagline{color:var(--muted);font-size:1.12rem;max-width:52ch;margin:.4rem auto 1.6rem;}
+  .cta{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;
+  padding:.7rem 1.4rem;border-radius:99px;box-shadow:var(--sh);}
+  .cta:hover{filter:brightness(1.08);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1.2rem 1.3rem;box-shadow:var(--sh);}
+  .card h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 .5rem;}
+  .card p{margin:0;font-size:.97rem;line-height:1.6;}
+  .foot{text-align:center;color:var(--muted);font-size:.82rem;margin-top:2.5rem;}
+</style></head><body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>🛰️ HADR Monitor</h1>
+      <p class="tagline">Turns scattered public disaster feeds into one clear picture of what matters right now.</p>
+      <a class="cta" href="harness-dashboard.html">View the live dashboard →</a>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>What is this?</h2><p>A situational-awareness board for humanitarian &amp; disaster
+        response. It pulls live public feeds, removes duplicates, and shows each significant event on a world map
+        with a NASA satellite view and a plain-language note on who's affected.</p></div>
+      <div class="card"><h2>Why &amp; where it's headed</h2><p>Responders drown in scattered, duplicated alerts.
+        This distils the noise into what's significant, where it is, and who it hits. Next: more feeds, sharper
+        impact ranking, before/after imagery, and alerts for the most severe events.</p></div>
+      <div class="card"><h2>Who it's for</h2><p>Duty officers, humanitarian analysts and responders doing a
+        situation scan. It speeds up the first decision of the day — what needs attention now, and where to look
+        first (triage &amp; prioritisation).</p></div>
+      <div class="card"><h2>What it does <em>not</em> do</h2><p>No forecasting, no tasking or dispatch, no
+        building-level damage (imagery is ~250&nbsp;m — smoke, floods, burn scars, not streets). Not real-time to
+        the second; severity is a modelled alert level, not verified ground truth. Decision support — a human
+        still decides.</p></div>
+    </div>
+    <p class="foot">Free feeds: GDACS · USGS · NASA EONET · US NWS · imagery NASA GIBS. Decision support, not a decision-maker.</p>
+  </div>
+</body></html>
+"""
+
+
+def write_landing():
+    Path("index.html").write_text(LANDING_HTML, encoding="utf-8")
+
+
 def main():
     print("1/5 gathering (GDACS + USGS + EONET + NWS) …")
     events, status = gather()
@@ -345,7 +436,8 @@ def main():
     events = assess(events)
     print("4/5 imagery + 5/5 rendering …")
     size = render(events, status)
-    print(f"Done → {DASHBOARD_PATH} ({size // 1024} KB).")
+    write_landing()
+    print(f"Done → index.html (landing) + {DASHBOARD_PATH} ({size // 1024} KB).")
     return 0
 
 
