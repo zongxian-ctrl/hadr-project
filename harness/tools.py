@@ -13,12 +13,14 @@ Sources here mirror the HADR project's feeds, plus NASA EONET:
 and one writer: write_dashboard.
 """
 
+import base64
 import json
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 DASHBOARD_PATH = "harness-dashboard.html"   # distinct name; won't clobber the product page
 
@@ -26,6 +28,8 @@ GDACS_URL = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP"
 USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/{feed}.geojson"
 RELIEFWEB_RSS = "https://reliefweb.int/disasters/rss.xml"
 EONET_URL = "https://eonet.gsfc.nasa.gov/api/v3/events"
+# NASA WorldView Snapshot API — wraps GIBS; returns one JPEG for a bbox+date.
+WORLDVIEW_URL = "https://wvs.earthdata.nasa.gov/api/v1/snapshot"
 EONET_CATEGORIES = [
     "drought", "dustHaze", "earthquakes", "floods", "landslides", "manmade",
     "seaLakeIce", "severeStorms", "snow", "tempExtremes", "volcanoes",
@@ -68,6 +72,8 @@ def fetch_feed():
                 "id": p.get("eventid"), "type": p.get("eventtype"),
                 "title": p.get("name"), "country": p.get("country"),
                 "alert": p.get("alertlevel"),
+                "coords": (f.get("geometry") or {}).get("coordinates"),  # [lon, lat]
+                "date": p.get("fromdate"),
             })
     return json.dumps({"source": "GDACS", "count": len(events), "events": events})
 
@@ -142,6 +148,45 @@ def fetch_eonet(category=None, limit=10):
                        "count": len(events), "events": events})
 
 
+# ---- satellite imagery: NASA GIBS via the WorldView snapshot API -------------
+# EONET/GDACS/USGS give WHERE + WHEN; GIBS gives the picture. Resolution is
+# ~250m-1km (MODIS/VIIRS): good for smoke plumes, flood extent, burn scars and
+# fire hotspots — NOT building-level damage.
+
+TRUECOLOR = "VIIRS_SNPP_CorrectedReflectance_TrueColor"
+FIRE_LAYER = "VIIRS_SNPP_Thermal_Anomalies_375m_All"
+
+
+def snapshot_url(lat, lon, date, span=1.0, layers=None, width=512, height=512):
+    """Build a WorldView/GIBS snapshot image URL for a place + date (no download)."""
+    layers = layers or f"{TRUECOLOR},{FIRE_LAYER}"
+    bbox = f"{lat - span},{lon - span},{lat + span},{lon + span}"  # EPSG:4326 = lat,lon
+    q = urlencode({
+        "REQUEST": "GetSnapshot", "LAYERS": layers, "CRS": "EPSG:4326",
+        "TIME": str(date)[:10], "BBOX": bbox, "FORMAT": "image/jpeg",
+        "WIDTH": width, "HEIGHT": height,
+    })
+    return f"{WORLDVIEW_URL}?{q}"
+
+
+def snapshot_data_uri(lat, lon, date, span=1.0, layers=None):
+    """Download the snapshot and return it as a base64 data: URI (self-contained
+    for embedding in HTML), or None if the fetch fails."""
+    url = snapshot_url(lat, lon, date, span=span, layers=layers)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "hadr-harness/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+        return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+    except Exception:
+        return None
+
+
+def fetch_imagery(lat, lon, date, span=1.0):
+    """Tool form: return a satellite-image URL for a place + date (aftermath)."""
+    return json.dumps({"image_url": snapshot_url(lat, lon, date, span=span)})
+
+
 # ---- writer: save the dashboard ---------------------------------------------
 
 def write_dashboard(html):
@@ -207,6 +252,25 @@ FETCH_EONET_SCHEMA = {
                 "limit": {"type": "integer", "description": "max events (default 10)"},
             },
             "required": [],
+        },
+    },
+}
+
+FETCH_IMAGERY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fetch_imagery",
+        "description": "Get a NASA satellite image URL (true-color + fire hotspots) "
+                       "for a location and date — the aftermath view of an event. "
+                       "~250m resolution: smoke/flood/burn-scar scale, not buildings.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "lat": {"type": "number"}, "lon": {"type": "number"},
+                "date": {"type": "string", "description": "YYYY-MM-DD"},
+                "span": {"type": "number", "description": "half-width in degrees (default 1.0)"},
+            },
+            "required": ["lat", "lon", "date"],
         },
     },
 }

@@ -27,7 +27,7 @@ any tool-capable `opencode-go/*` model works, e.g. `kimi-k2.7-code`, `glm-5.2`.
 
 Run every level from the **repo root**.
 
-## The seven levels
+## The eight levels
 
 | Level | File | The one new idea |
 |-------|------|------------------|
@@ -38,6 +38,7 @@ Run every level from the **repo root**.
 | 5 | `level5_dashboard.py` | **A second tool.** Add `write_dashboard`; the same loop now chains fetch → assess → write on its own. |
 | 6 | `level6_goal.py` | **A goal checker.** A deterministic check — not the model — decides if the goal is met; if not, it feeds back and retries. This is what `/goal` does. |
 | 7 | `level7_multisource.py` | **Many tools, with arguments.** Four data sources (GDACS, USGS, ReliefWeb, EONET); the model chooses *which* to call and *with what arguments*. Same loop — a bigger toolbox. |
+| 8 | `level8_capstone.py` | **The capstone.** Gather all sources → fetch a NASA aftermath satellite image per event → model assesses each → render a polished self-contained UI. Deterministic gather+render, model only for judgement. |
 
 ### The sources (`tools.py`)
 
@@ -47,6 +48,7 @@ Run every level from the **repo root**.
 | `fetch_usgs` | USGS earthquakes | `min_magnitude`, `window` | Magnitude + time window. |
 | `fetch_reliefweb` | ReliefWeb RSS | `limit` | Curated, slower, no severity. |
 | `fetch_eonet` | NASA EONET | `category`, `limit` | Natural-events catalog; no severity. |
+| `fetch_imagery` | NASA GIBS / WorldView | `lat`, `lon`, `date` | Satellite image (aftermath) for a place+date. ~250m: smoke/flood/burn-scar scale, not buildings. |
 
 Shared plumbing (not the lesson): `llm.py` (the raw HTTP call) and `tools.py`
 (the tool functions + their JSON schemas).
@@ -64,6 +66,7 @@ python harness/level6_goal.py                 # full loop: shared snapshot + det
 python harness/level6_goal.py --judge         # also run a SEPARATE-model judge for the prose
 python harness/level7_multisource.py          # agent picks among GDACS/USGS/ReliefWeb/EONET
 python harness/level7_multisource.py "strongest quakes today and any active volcanoes"
+python harness/level8_capstone.py             # auto: gather all + aftermath imagery -> nice UI
 ```
 
 ## How this maps to the real tools
