@@ -29,7 +29,15 @@ from tools import (
     fetch_eonet, fetch_feed, fetch_nws, fetch_usgs, snapshot_data_uri,
 )
 
-MAX_EVENTS = 10
+# ---- how much to fetch (tune these) -----------------------------------------
+MAX_EVENTS = 10           # total events shown after de-duplication; raise for more
+USGS_MIN_MAG = 5.0        # earthquakes at/above this magnitude…
+USGS_WINDOW = "day"       # …within: "hour" | "day" | "week"  (week = many more)
+NWS_MIN_SEV = "Severe"    # "Extreme" | "Severe" | "Moderate" | "Minor" (lower = more)
+FEED_CAPS = {"GDACS": 99, "USGS": 6, "EONET": 5, "NWS": 4}   # per-feed maximum
+# NOTE: GDACS is fixed to Orange/Red inside fetch_feed (Green is mostly noise);
+# broaden EONET by category count via FEED_CAPS["EONET"].
+# -----------------------------------------------------------------------------
 WORLD_PATH = (Path(__file__).parent / "assets" / "world_path.txt").read_text(encoding="utf-8")
 SEV_RANK = {"red": 0, "orange": 1, "info": 2}
 GDACS_HAZARD = {"EQ": "earthquake", "TC": "cyclone", "FL": "flood",
@@ -70,31 +78,37 @@ def gather():
         return {"source": "GDACS", "title": e["title"], "severity": e.get("alert"),
                 "sev_level": "red" if e.get("alert") == "Red" else "orange",
                 "hazard": GDACS_HAZARD.get(e.get("type"), (e.get("type") or "").lower()),
-                "where": e.get("country"), "lon": c[0], "lat": c[1], "date": e.get("date")}
+                "where": e.get("country"), "lon": c[0], "lat": c[1], "date": e.get("date"),
+                "url": e.get("url"), "detail": None}
 
     def us(e):
         c = e.get("coords") or [None, None]
         mag = e.get("mag") or 0
+        depth = e.get("depth")
         return {"source": "USGS", "title": f"M{mag} — {e['place']}", "severity": f"M{mag}",
                 "sev_level": "red" if mag >= 6 else "orange", "hazard": "earthquake",
-                "where": e.get("place"), "lon": c[0], "lat": c[1], "date": e.get("time")}
+                "where": e.get("place"), "lon": c[0], "lat": c[1], "date": e.get("time"),
+                "url": e.get("url"),
+                "detail": f"Depth {depth:.0f} km" if depth is not None else None}
 
     def eo(e):
         c = e.get("coords") or [None, None]
         return {"source": "EONET", "title": e["title"], "severity": e.get("category"),
                 "sev_level": "info", "hazard": _norm_eonet_hazard(e.get("category")),
-                "where": e.get("category"), "lon": c[0], "lat": c[1], "date": e.get("date")}
+                "where": e.get("category"), "lon": c[0], "lat": c[1], "date": e.get("date"),
+                "url": e.get("url"), "detail": None}
 
     def nw(e):
         return {"source": "NWS", "title": e.get("event"), "severity": e.get("severity"),
                 "sev_level": "red" if e.get("severity") == "Extreme" else "orange",
                 "hazard": "weather", "where": e.get("area"),
-                "lon": e.get("lon"), "lat": e.get("lat"), "date": e.get("date")}
+                "lon": e.get("lon"), "lat": e.get("lat"), "date": e.get("date"),
+                "url": None, "detail": e.get("headline")}
 
-    add("GDACS", fetch_feed(), gd, 99)
-    add("USGS", fetch_usgs(5.0, "day"), us, 6)
-    add("EONET", fetch_eonet(None, 20), eo, 5)
-    add("NWS", fetch_nws("Severe", 20), nw, 4)
+    add("GDACS", fetch_feed(), gd, FEED_CAPS["GDACS"])
+    add("USGS", fetch_usgs(USGS_MIN_MAG, USGS_WINDOW), us, FEED_CAPS["USGS"])
+    add("EONET", fetch_eonet(None, 20), eo, FEED_CAPS["EONET"])
+    add("NWS", fetch_nws(NWS_MIN_SEV, 20), nw, FEED_CAPS["NWS"])
     return events, status
 
 
@@ -172,15 +186,16 @@ def render(events, status):
     merged_ct = sum(1 for e in events if len(e["sources"]) > 1)
 
     dots = []
-    for e in events:
+    for i, e in enumerate(events):
         x, y = _proj(e["lat"], e["lon"])
         srcs = ",".join(e["sources"])
         sub = f"{'+'.join(e['sources'])} · {e.get('severity') or ''} · {(e.get('where') or '')} · {(e.get('date') or '')[:10]}"
         dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5.5" class="dot {e["sev_level"]}" '
-                    f'data-source="{esc(srcs)}" data-title="{esc(e["title"])}" data-sub="{esc(sub)}"/>')
+                    f'data-source="{esc(srcs)}" data-title="{esc(e["title"])}" data-sub="{esc(sub)}" '
+                    f'onclick="jump({i})"/>')
 
     cards = []
-    for e in events:
+    for i, e in enumerate(events):
         plain = snapshot_data_uri(e["lat"], e["lon"], e.get("date") or "", layers=TRUECOLOR)
         fire = snapshot_data_uri(e["lat"], e["lon"], e.get("date") or "",
                                  layers=f"{TRUECOLOR},{FIRE_LAYER}") or plain
@@ -190,7 +205,10 @@ def render(events, status):
         when = (e.get("date") or "")[:10]
         src_badges = "".join(f'<span class="src">{esc(s)}</span>' for s in e["sources"])
         merged_tag = '<span class="merged">merged</span>' if len(e["sources"]) > 1 else ""
-        cards.append(f"""    <article class="card {e['sev_level']}" data-source="{esc(','.join(e['sources']))}">
+        detail_html = f'<p class="detail">{esc(e["detail"])}</p>' if e.get("detail") else ""
+        link_html = (f'<a class="srclink" href="{esc(e["url"])}" target="_blank" rel="noopener">Full record ↗</a>'
+                     if e.get("url") else "")
+        cards.append(f"""    <article id="ev{i}" class="card {e['sev_level']}" data-source="{esc(','.join(e['sources']))}">
       {img}
       <div class="body">
         <div class="row"><span class="badge {e['sev_level']}">{esc(str(e.get('severity') or ''))}</span>
@@ -198,6 +216,8 @@ def render(events, status):
         <h3>{esc(e['title'])}</h3>
         <p class="meta">{esc(e.get('where') or '')}{' · ' if e.get('where') else ''}{esc(when)}</p>
         <p class="assess">{esc(e.get('assessment') or '')}</p>
+        {detail_html}
+        {link_html}
       </div>
     </article>""")
 
@@ -267,6 +287,11 @@ def render(events, status):
   .src{{color:var(--muted);font-size:.72rem;border:1px solid var(--line);border-radius:99px;padding:.02rem .4rem;}}
   h3{{font-size:1rem;margin:.15rem 0 .3rem;}}
   .meta{{color:var(--muted);font-size:.78rem;margin:.15rem 0;}} .assess{{margin:.45rem 0 0;font-size:.9rem;}}
+  .detail{{color:var(--muted);font-size:.8rem;margin:.35rem 0 0;}}
+  .srclink{{display:inline-block;margin-top:.5rem;font-size:.8rem;color:var(--info);text-decoration:none;}}
+  .srclink:hover{{text-decoration:underline;}}
+  .card.flash{{animation:flash 1.2s ease;}}
+  @keyframes flash{{0%,100%{{box-shadow:var(--sh);}}25%{{box-shadow:0 0 0 3px var(--info);}}}}
 </style></head><body>
   <div class="wrap">
     <div class="topnav">
@@ -310,6 +335,10 @@ def render(events, status):
   <div id="tip" class="tip"></div>
   <script>
     function fire(on){{document.querySelectorAll('img.sat').forEach(i=>i.src=on?i.dataset.fire:i.dataset.plain);}}
+    function jump(i){{var c=document.getElementById('ev'+i);if(!c)return;
+      c.classList.remove('hide');
+      c.scrollIntoView({{behavior:'smooth',block:'center'}});
+      c.classList.add('flash');setTimeout(function(){{c.classList.remove('flash');}},1200);}}
     function match(el,f){{return f==='All'||el.dataset.source.split(',').indexOf(f)>=0;}}
     function filt(btn){{
       var f=btn.dataset.f;

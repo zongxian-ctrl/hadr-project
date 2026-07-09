@@ -75,6 +75,8 @@ def fetch_feed():
                 "alert": p.get("alertlevel"),
                 "coords": (f.get("geometry") or {}).get("coordinates"),  # [lon, lat]
                 "date": p.get("fromdate"),
+                "url": (p.get("url") or {}).get("report"),
+                "detail": p.get("htmldescription"),
             })
     return json.dumps({"source": "GDACS", "count": len(events), "events": events})
 
@@ -99,7 +101,8 @@ def fetch_usgs(min_magnitude=4.5, window="day"):
             quakes.append({
                 "id": f.get("id"), "mag": p.get("mag"), "place": p.get("place"),
                 "time": _ms_to_iso(p["time"]) if p.get("time") else None,
-                "coords": c[:2],
+                "coords": c[:2], "url": p.get("url"),
+                "depth": c[2] if len(c) > 2 else None,
             })
     return json.dumps({"source": "USGS", "window": window,
                        "min_magnitude": min_magnitude, "count": len(quakes),
@@ -192,6 +195,7 @@ def fetch_eonet(category=None, limit=10):
             "id": e.get("id"), "title": e.get("title"),
             "category": cats[0].get("title"),
             "date": geo.get("date"), "coords": geo.get("coordinates"),
+            "url": (e.get("sources") or [{}])[0].get("url"),
         })
     return json.dumps({"source": "EONET", "category": category or "all",
                        "count": len(events), "events": events})
