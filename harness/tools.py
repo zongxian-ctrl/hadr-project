@@ -27,6 +27,7 @@ DASHBOARD_PATH = "harness-dashboard.html"   # distinct name; won't clobber the p
 GDACS_URL = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP"
 USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/{feed}.geojson"
 RELIEFWEB_RSS = "https://reliefweb.int/disasters/rss.xml"
+NWS_ALERTS = "https://api.weather.gov/alerts/active"
 EONET_URL = "https://eonet.gsfc.nasa.gov/api/v3/events"
 # NASA WorldView Snapshot API — wraps GIBS; returns one JPEG for a bbox+date.
 WORLDVIEW_URL = "https://wvs.earthdata.nasa.gov/api/v1/snapshot"
@@ -121,6 +122,54 @@ def fetch_reliefweb(limit=10):
             "date": (item.findtext("pubDate") or "").strip(),
         })
     return json.dumps({"source": "ReliefWeb", "count": len(items), "events": items})
+
+
+# ---- source 4b: NWS severe-weather alerts (US; keyless, HAS severity) --------
+
+_NWS_ORDER = {"Extreme": 4, "Severe": 3, "Moderate": 2, "Minor": 1, "Unknown": 0}
+
+
+def _centroid(geometry):
+    """Rough centroid (lon, lat) of any GeoJSON geometry, or (None, None)."""
+    if not geometry:
+        return None, None
+    pts = []
+
+    def walk(x):
+        if isinstance(x, list) and x and isinstance(x[0], (int, float)) and len(x) >= 2:
+            pts.append((x[0], x[1]))
+        elif isinstance(x, list):
+            for y in x:
+                walk(y)
+
+    walk(geometry.get("coordinates"))
+    if not pts:
+        return None, None
+    return sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+
+
+def fetch_nws(min_severity="Severe", limit=10):
+    """Return active US NWS weather alerts at/above a severity (Extreme/Severe/...)."""
+    floor = _NWS_ORDER.get(min_severity, 3)
+    try:
+        data = json.loads(_get(NWS_ALERTS))
+    except Exception as e:
+        return json.dumps({"error": f"NWS unreachable: {e}"})
+    out = []
+    for f in data.get("features", []):
+        p = f.get("properties", {})
+        if _NWS_ORDER.get(p.get("severity"), 0) < floor:
+            continue
+        lon, lat = _centroid(f.get("geometry"))
+        out.append({
+            "event": p.get("event"), "severity": p.get("severity"),
+            "area": (p.get("areaDesc") or "").split(";")[0].strip(),
+            "headline": p.get("headline"), "lon": lon, "lat": lat,
+            "date": p.get("onset") or p.get("effective"),
+        })
+        if len(out) >= int(limit):
+            break
+    return json.dumps({"source": "NWS", "count": len(out), "events": out})
 
 
 # ---- source 4: NASA EONET (natural events, no severity; args: category) ------
@@ -256,6 +305,24 @@ FETCH_EONET_SCHEMA = {
                 "category": {"type": "string", "enum": EONET_CATEGORIES,
                              "description": "e.g. wildfires, floods, volcanoes, severeStorms"},
                 "limit": {"type": "integer", "description": "max events (default 10)"},
+            },
+            "required": [],
+        },
+    },
+}
+
+FETCH_NWS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fetch_nws",
+        "description": "Fetch active US National Weather Service alerts at or above "
+                       "a severity (Extreme, Severe, Moderate, Minor). US-only.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "min_severity": {"type": "string",
+                                 "enum": ["Extreme", "Severe", "Moderate", "Minor"]},
+                "limit": {"type": "integer"},
             },
             "required": [],
         },
