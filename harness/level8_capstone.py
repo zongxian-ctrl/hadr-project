@@ -1,24 +1,26 @@
-"""Level 8 — the capstone: gather every source, see the aftermath, render a UI.
+"""Level 8 — the capstone: gather every source, resolve duplicates, see the
+aftermath, render an interactive UI.
 
 End to end, automatically:
-  1. GATHER (deterministic): significant events from GDACS + USGS + EONET + NWS,
-     each normalised to {severity level, coords, date}; record which feeds answered.
-  2. SEE (deterministic): a NASA true-color image per event (+ a fire-overlay
-     version), embedded as self-contained data: URIs; a page toggle swaps them.
-  3. ASSESS (model): one call for a 'who is affected' line per event.
-  4. RENDER (deterministic): a polished dashboard — KPI tiles, a world map with
-     event dots, a severity legend, source filters, and the card grid.
+  1. GATHER (deterministic): significant events from GDACS + USGS + EONET + NWS.
+  2. RESOLVE (deterministic): merge the SAME real-world event seen by more than
+     one feed (e.g. a quake in both USGS and GDACS) into one, by hazard type +
+     space + time — the core HADR entity-resolution problem, in miniature.
+  3. SEE (deterministic): a NASA image per event (+ a fire-overlay version).
+  4. ASSESS (model): one call for a 'who is affected' line per event.
+  5. RENDER (deterministic): KPI tiles, a world map with hoverable event dots,
+     a legend, source filters, and the card grid.
 
-Design follows the dataviz method: severity is a STATUS palette (red/orange +
-always a label, never colour alone); sources are categorical; geography gets a
-map. Deterministic gather+render outside, model only for judgement inside.
+Design follows the dataviz method: severity = status palette (label, never
+colour alone); sources categorical; geography gets a map with a hover layer.
 
-Run:  python harness/level8_capstone.py
-Produces: harness-dashboard.html
+Run:  python harness/level8_capstone.py       →  harness-dashboard.html
 """
 
 import html as html_mod
 import json
+import math
+from datetime import datetime
 from pathlib import Path
 
 from llm import call_model
@@ -30,7 +32,18 @@ from tools import (
 MAX_EVENTS = 10
 WORLD_PATH = (Path(__file__).parent / "assets" / "world_path.txt").read_text(encoding="utf-8")
 SEV_RANK = {"red": 0, "orange": 1, "info": 2}
-SEV_LABEL = {"red": "Severe impact", "orange": "Significant", "info": "Catalogued (no severity)"}
+GDACS_HAZARD = {"EQ": "earthquake", "TC": "cyclone", "FL": "flood",
+                "WF": "wildfire", "VO": "volcano", "DR": "drought"}
+MERGE_KM = 200      # events closer than this (same hazard, same ~time) are one
+MERGE_DAYS = 3
+
+
+def _norm_eonet_hazard(cat):
+    c = (cat or "").lower()
+    for token in ("wildfire", "flood", "volcano", "earthquake", "landslide", "drought"):
+        if c.startswith(token):
+            return token
+    return c or "event"
 
 
 def gather():
@@ -56,38 +69,83 @@ def gather():
         c = e.get("coords") or [None, None]
         return {"source": "GDACS", "title": e["title"], "severity": e.get("alert"),
                 "sev_level": "red" if e.get("alert") == "Red" else "orange",
+                "hazard": GDACS_HAZARD.get(e.get("type"), (e.get("type") or "").lower()),
                 "where": e.get("country"), "lon": c[0], "lat": c[1], "date": e.get("date")}
 
     def us(e):
         c = e.get("coords") or [None, None]
         mag = e.get("mag") or 0
         return {"source": "USGS", "title": f"M{mag} — {e['place']}", "severity": f"M{mag}",
-                "sev_level": "red" if mag >= 6 else "orange",
+                "sev_level": "red" if mag >= 6 else "orange", "hazard": "earthquake",
                 "where": e.get("place"), "lon": c[0], "lat": c[1], "date": e.get("time")}
 
     def eo(e):
         c = e.get("coords") or [None, None]
         return {"source": "EONET", "title": e["title"], "severity": e.get("category"),
-                "sev_level": "info", "where": e.get("category"),
-                "lon": c[0], "lat": c[1], "date": e.get("date")}
+                "sev_level": "info", "hazard": _norm_eonet_hazard(e.get("category")),
+                "where": e.get("category"), "lon": c[0], "lat": c[1], "date": e.get("date")}
 
     def nw(e):
         return {"source": "NWS", "title": e.get("event"), "severity": e.get("severity"),
                 "sev_level": "red" if e.get("severity") == "Extreme" else "orange",
-                "where": e.get("area"), "lon": e.get("lon"), "lat": e.get("lat"), "date": e.get("date")}
+                "hazard": "weather", "where": e.get("area"),
+                "lon": e.get("lon"), "lat": e.get("lat"), "date": e.get("date")}
 
     add("GDACS", fetch_feed(), gd, 99)
-    add("USGS", fetch_usgs(5.0, "day"), us, 4)
-    add("EONET", fetch_eonet(None, 20), eo, 4)
-    add("NWS", fetch_nws("Severe", 20), nw, 3)
+    add("USGS", fetch_usgs(5.0, "day"), us, 6)
+    add("EONET", fetch_eonet(None, 20), eo, 5)
+    add("NWS", fetch_nws("Severe", 20), nw, 4)
+    return events, status
 
-    events.sort(key=lambda e: SEV_RANK.get(e["sev_level"], 3))
-    return events[:MAX_EVENTS], status
+
+# ---- entity resolution: merge one real event seen by several feeds -----------
+
+def _haversine_km(a, b):
+    r = 6371.0
+    la1, lo1, la2, lo2 = map(math.radians, [a["lat"], a["lon"], b["lat"], b["lon"]])
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(h))
+
+
+def _parse_dt(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "").strip()[:19])
+    except Exception:
+        return None
+
+
+def _same_event(a, b):
+    if not a["hazard"] or a["hazard"] != b["hazard"]:
+        return False
+    if _haversine_km(a, b) > MERGE_KM:
+        return False
+    da, db = _parse_dt(a.get("date")), _parse_dt(b.get("date"))
+    if da and db and abs((da - db).days) > MERGE_DAYS:
+        return False
+    return True
+
+
+def merge_events(events):
+    """Fold duplicate observations of one event into a single record whose
+    `sources` lists every feed that saw it. The most-severe observation wins as
+    the primary (its title/coords/severity are kept)."""
+    merged = []
+    for e in sorted(events, key=lambda x: SEV_RANK.get(x["sev_level"], 3)):
+        hit = next((m for m in merged if _same_event(e, m)), None)
+        if hit:
+            if e["source"] not in hit["sources"]:
+                hit["sources"].append(e["source"])
+        else:
+            e = dict(e)
+            e["sources"] = [e["source"]]
+            merged.append(e)
+    return merged
 
 
 def assess(events):
-    """One model call: a 'who is affected' line per event. Falls back to '' on failure."""
-    listing = "\n".join(f"{i}. {e['title']} ({e['source']}, {e.get('where') or ''})"
+    listing = "\n".join(f"{i}. {e['title']} ({'+'.join(e['sources'])}, {e.get('where') or ''})"
                         for i, e in enumerate(events))
     prompt = ("For each numbered event, write ONE short 'who/what is affected' sentence. "
               "No invented figures. Reply JSON only: {\"0\":\"...\"}\n\n" + listing)
@@ -111,11 +169,15 @@ def render(events, status):
     reds = sum(1 for e in events if e["sev_level"] == "red")
     oranges = sum(1 for e in events if e["sev_level"] == "orange")
     live = sum(1 for v in status.values() if v != "unreachable")
+    merged_ct = sum(1 for e in events if len(e["sources"]) > 1)
 
-    dots = "".join(
-        f'<circle cx="{_proj(e["lat"], e["lon"])[0]:.1f}" cy="{_proj(e["lat"], e["lon"])[1]:.1f}" '
-        f'r="5" class="dot {e["sev_level"]}" data-source="{e["source"]}"><title>{esc(e["title"])}</title></circle>'
-        for e in events)
+    dots = []
+    for e in events:
+        x, y = _proj(e["lat"], e["lon"])
+        srcs = ",".join(e["sources"])
+        sub = f"{'+'.join(e['sources'])} · {e.get('severity') or ''} · {(e.get('where') or '')} · {(e.get('date') or '')[:10]}"
+        dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5.5" class="dot {e["sev_level"]}" '
+                    f'data-source="{esc(srcs)}" data-title="{esc(e["title"])}" data-sub="{esc(sub)}"/>')
 
     cards = []
     for e in events:
@@ -126,11 +188,13 @@ def render(events, status):
                f'alt="satellite view of {esc(e["title"])}" loading="lazy">' if plain
                else '<div class="noimg">imagery unavailable</div>')
         when = (e.get("date") or "")[:10]
-        cards.append(f"""    <article class="card {e['sev_level']}" data-source="{esc(e['source'])}">
+        src_badges = "".join(f'<span class="src">{esc(s)}</span>' for s in e["sources"])
+        merged_tag = '<span class="merged">merged</span>' if len(e["sources"]) > 1 else ""
+        cards.append(f"""    <article class="card {e['sev_level']}" data-source="{esc(','.join(e['sources']))}">
       {img}
       <div class="body">
         <div class="row"><span class="badge {e['sev_level']}">{esc(str(e.get('severity') or ''))}</span>
-          <span class="src">{esc(e['source'])}</span></div>
+          {merged_tag}{src_badges}</div>
         <h3>{esc(e['title'])}</h3>
         <p class="meta">{esc(e.get('where') or '')}{' · ' if e.get('where') else ''}{esc(when)}</p>
         <p class="assess">{esc(e.get('assessment') or '')}</p>
@@ -142,6 +206,7 @@ def render(events, status):
         for s in ("GDACS", "USGS", "EONET", "NWS"))
     filters = "".join(f'<button class="chip" data-f="{s}" onclick="filt(this)">{s}</button>'
                       for s in ["All", "GDACS", "USGS", "EONET", "NWS"])
+    merged_note = f' · {merged_ct} cross-feed match{"es" if merged_ct != 1 else ""}' if merged_ct else ""
 
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -171,9 +236,12 @@ def render(events, status):
   .swatch{{width:11px;height:11px;border-radius:99px;display:inline-block;box-shadow:0 0 0 2px var(--panel);}}
   .swatch.red{{background:var(--red);}} .swatch.orange{{background:var(--orange);}} .swatch.info{{background:var(--info);}}
   svg.map{{width:100%;height:auto;display:block;border-radius:10px;background:var(--ocean);}}
-  .map .land{{fill:var(--land);}} .dot{{stroke:var(--panel);stroke-width:1.5;}}
-  .dot.red{{fill:var(--red);}} .dot.orange{{fill:var(--orange);}} .dot.info{{fill:var(--info);}}
+  .map .land{{fill:var(--land);}} .dot{{stroke:var(--panel);stroke-width:1.5;cursor:pointer;transition:r .1s;}}
+  .dot:hover{{r:8;}} .dot.red{{fill:var(--red);}} .dot.orange{{fill:var(--orange);}} .dot.info{{fill:var(--info);}}
   .dot.hide{{display:none;}}
+  .tip{{position:fixed;display:none;z-index:9;background:var(--panel);color:var(--fg);border:1px solid var(--line);
+  box-shadow:var(--sh);border-radius:8px;padding:.45rem .6rem;font-size:.8rem;max-width:240px;pointer-events:none;}}
+  .tip b{{display:block;margin-bottom:.1rem;}}
   .bar{{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:0 0 1rem;font-size:.82rem;color:var(--muted);}}
   .bar .ok{{color:var(--ok);}} .bar .down{{color:var(--down);font-weight:700;}}
   .chips{{display:flex;gap:.4rem;flex-wrap:wrap;}} .chip{{border:1px solid var(--line);background:var(--panel);
@@ -187,36 +255,39 @@ def render(events, status):
   .card.hide{{display:none;}}
   .card img,.noimg{{width:100%;height:170px;object-fit:cover;background:#000;display:block;}}
   .noimg{{display:flex;align-items:center;justify-content:center;color:var(--muted);background:var(--line);font-size:.85rem;}}
-  .body{{padding:.75rem .95rem 1rem;}} .row{{display:flex;gap:.5rem;align-items:center;margin-bottom:.25rem;}}
+  .body{{padding:.75rem .95rem 1rem;}} .row{{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-bottom:.25rem;}}
   .badge{{font-size:.68rem;font-weight:700;text-transform:uppercase;padding:.1rem .5rem;border-radius:99px;color:#fff;background:var(--muted);}}
   .badge.red{{background:var(--red);}} .badge.orange{{background:var(--orange);}} .badge.info{{background:var(--info);}}
-  .src{{color:var(--muted);font-size:.76rem;margin-left:auto;}} h3{{font-size:1rem;margin:.15rem 0 .3rem;}}
+  .merged{{font-size:.62rem;font-weight:700;text-transform:uppercase;padding:.1rem .45rem;border-radius:99px;
+  border:1px dashed var(--muted);color:var(--muted);}}
+  .src{{color:var(--muted);font-size:.72rem;border:1px solid var(--line);border-radius:99px;padding:.02rem .4rem;}}
+  h3{{font-size:1rem;margin:.15rem 0 .3rem;}}
   .meta{{color:var(--muted);font-size:.78rem;margin:.15rem 0;}} .assess{{margin:.45rem 0 0;font-size:.9rem;}}
 </style></head><body>
   <div class="wrap">
     <h1>🛰️ HADR Situational Dashboard</h1>
-    <p class="sub">{len(events)} significant events across {live} live feeds · NASA
-      satellite view per event (GIBS/VIIRS ~250m)</p>
+    <p class="sub">{len(events)} events across {live} live feeds{merged_note} ·
+      NASA satellite view per event (GIBS/VIIRS ~250m)</p>
 
     <div class="kpis">
-      <div class="kpi"><div class="n">{len(events)}</div><div class="l">Significant events</div></div>
+      <div class="kpi"><div class="n">{len(events)}</div><div class="l">Events</div></div>
       <div class="kpi red"><div class="n">{reds}</div><div class="l">Severe impact</div></div>
       <div class="kpi orange"><div class="n">{oranges}</div><div class="l">Significant</div></div>
       <div class="kpi"><div class="n">{live}/4</div><div class="l">Feeds live</div></div>
     </div>
 
     <div class="panel">
-      <div class="maphead">
-        <h2>Where</h2>
+      <div class="maphead"><h2>Where</h2>
         <div class="legend">
           <span class="k"><span class="swatch red"></span>Severe</span>
           <span class="k"><span class="swatch orange"></span>Significant</span>
           <span class="k"><span class="swatch info"></span>Catalogued</span>
+          <span class="k">hover a dot for details</span>
         </div>
       </div>
       <svg class="map" viewBox="0 0 1000 500" role="img" aria-label="World map of current events">
         <path class="land" d="{WORLD_PATH}"/>
-        {dots}
+        {''.join(dots)}
       </svg>
     </div>
 
@@ -229,15 +300,27 @@ def render(events, status):
 {chr(10).join(cards)}
     </div>
   </div>
+  <div id="tip" class="tip"></div>
   <script>
     function fire(on){{document.querySelectorAll('img.sat').forEach(i=>i.src=on?i.dataset.fire:i.dataset.plain);}}
+    function match(el,f){{return f==='All'||el.dataset.source.split(',').indexOf(f)>=0;}}
     function filt(btn){{
       var f=btn.dataset.f;
       document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c===btn));
-      document.querySelectorAll('.card').forEach(c=>c.classList.toggle('hide', f!=='All'&&c.dataset.source!==f));
-      document.querySelectorAll('.dot').forEach(d=>d.classList.toggle('hide', f!=='All'&&d.dataset.source!==f));
+      document.querySelectorAll('.card').forEach(c=>c.classList.toggle('hide',!match(c,f)));
+      document.querySelectorAll('.dot').forEach(d=>d.classList.toggle('hide',!match(d,f)));
     }}
     document.querySelector('.chip').classList.add('on');
+    var tip=document.getElementById('tip');
+    document.querySelectorAll('.dot').forEach(function(d){{
+      d.addEventListener('mousemove',function(ev){{
+        tip.innerHTML='<b>'+d.dataset.title+'</b>'+d.dataset.sub;
+        tip.style.display='block';
+        tip.style.left=Math.min(ev.clientX+14,window.innerWidth-250)+'px';
+        tip.style.top=(ev.clientY+14)+'px';
+      }});
+      d.addEventListener('mouseleave',function(){{tip.style.display='none';}});
+    }});
   </script>
 </body></html>
 """
@@ -246,15 +329,21 @@ def render(events, status):
 
 
 def main():
-    print("1/4 gathering (GDACS + USGS + EONET + NWS) …")
+    print("1/5 gathering (GDACS + USGS + EONET + NWS) …")
     events, status = gather()
     print(f"    feeds: {status}")
     if not events:
         print("No located events right now.")
         return 0
-    print("2/4 assessing (model) …")
+    print("2/5 resolving duplicates across feeds …")
+    events = merge_events(events)
+    events.sort(key=lambda e: SEV_RANK.get(e["sev_level"], 3))
+    events = events[:MAX_EVENTS]
+    merged_ct = sum(1 for e in events if len(e["sources"]) > 1)
+    print(f"    {len(events)} unique events ({merged_ct} matched across feeds)")
+    print("3/5 assessing (model) …")
     events = assess(events)
-    print("3/4 imagery + 4/4 rendering …")
+    print("4/5 imagery + 5/5 rendering …")
     size = render(events, status)
     print(f"Done → {DASHBOARD_PATH} ({size // 1024} KB).")
     return 0

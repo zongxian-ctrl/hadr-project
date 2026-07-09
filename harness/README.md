@@ -30,7 +30,7 @@ Run every level from the **repo root**.
 | 5 | `level5_dashboard.py` | **A second tool.** Add `write_dashboard`; the same loop now chains fetch → assess → write on its own. |
 | 6 | `level6_goal.py` | **A goal checker.** A deterministic check — not the model — decides if the goal is met; if not, it feeds back and retries. This is what `/goal` does. |
 | 7 | `level7_multisource.py` | **Many tools, with arguments.** Four data sources (GDACS, USGS, ReliefWeb, EONET); the model chooses *which* to call and *with what arguments*. Same loop — a bigger toolbox. |
-| 8 | `level8_capstone.py` | **The capstone.** Gather 4 feeds (GDACS/USGS/EONET/NWS) → NASA aftermath image per event → model assesses each → render a polished UI: **KPI tiles, a world map with severity-coded event dots, a legend, source filters, feed-status, and a fire-detection toggle**. Deterministic gather+render, model only for judgement. |
+| 8 | `level8_capstone.py` | **The capstone.** Gather 4 feeds (GDACS/USGS/EONET/NWS) → **resolve duplicates** (the same event from >1 feed merged by hazard+space+time) → NASA aftermath image per event → model assesses each → render a polished UI: **KPI tiles, a world map with severity-coded, hoverable event dots, a legend, source filters, feed-status, and a fire-detection toggle**. Deterministic gather+resolve+render, model only for judgement. |
 
 ### The sources (`tools.py`)
 
