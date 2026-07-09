@@ -30,7 +30,7 @@ from tools import (
 )
 
 # ---- how much to fetch (tune these) -----------------------------------------
-MAX_EVENTS = 10           # total events shown after de-duplication; raise for more
+MAX_EVENTS = 30           # total events shown after de-duplication; raise for more
 USGS_MIN_MAG = 5.0        # earthquakes at/above this magnitude…
 USGS_WINDOW = "day"       # …within: "hour" | "day" | "week"  (week = many more)
 NWS_MIN_SEV = "Severe"    # "Extreme" | "Severe" | "Moderate" | "Minor" (lower = more)
