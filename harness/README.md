@@ -49,8 +49,9 @@ python harness/level2_system.py               # same, but follows prompt.txt
 python harness/level3_one_tool.py             # one fetch_feed round
 python harness/level4_agent_loop.py           # loops until the model stops asking
 python harness/level5_dashboard.py            # fetch -> assess -> write; makes harness-dashboard.html
-python harness/level6_goal.py                 # agent + deterministic goal check, retries until met
-python harness/level6_goal.py --demo-retry    # force one rejection to watch the retry cycle
+python harness/level6_goal.py --selftest      # prove the checker itself (no API key needed)
+python harness/level6_goal.py                 # full loop: shared snapshot + deterministic gate
+python harness/level6_goal.py --judge         # also run a SEPARATE-model judge for the prose
 ```
 
 ## How this maps to the real tools
@@ -60,10 +61,17 @@ python harness/level6_goal.py --demo-retry    # force one rejection to watch the
   function the model can request; your code runs it and returns the result.
 - **The Level 4 loop → the agent**: "keep going while it asks for tools" is the
   core.
-- **The Level 6 checker → `/goal`**: an independent, deterministic check decides
-  "done" (not the model), and loops back with feedback if the goal isn't met.
-  In practice the checker keeps catching the model saying "DONE" when a required
-  event title isn't actually on the page — which is exactly why the decider must
-  be separate from the doer.
+- **The Level 6 checker → `/goal`**: an independent verifier decides "done", not
+  the model. Two lessons in it:
+  - **One shared snapshot.** The feed is fetched once; the agent writes from that
+    briefing and the checker judges against the *same* briefing — no second
+    fetch, no race, a fixed target. This mirrors the project's
+    gate → `briefing.json` → model flow.
+  - **A goal is a proxy, so verify in two tiers.** A *strong deterministic* gate
+    for what code can check for sure (every event present with its exact alert
+    level, no ungrounded casualty figures) — trustworthy but shallow; plus an
+    *optional separate-model judge* (`--judge`) for the fuzzy prose — deeper but
+    softer, and deliberately a **different** model than the writer. An agent is
+    only as good as its verifier, and any single proxy can be gamed.
 - This project's real pipeline is the same shape: the deterministic gate writes
   a briefing, then a model (via a tool-running harness) writes the report.

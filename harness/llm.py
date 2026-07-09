@@ -23,7 +23,7 @@ ENDPOINT = "https://opencode.ai/zen/go/v1/chat/completions"
 MODEL = os.environ.get("HARNESS_MODEL", "qwen3.7-max")
 
 
-def call_model(messages, tools=None):
+def call_model(messages, tools=None, model_override=None):
     """POST the conversation to the model; return the assistant's message dict.
 
     `messages` is the whole conversation so far (the model is stateless — the
@@ -37,7 +37,7 @@ def call_model(messages, tools=None):
             "it from your OpenCode auth without printing it."
         )
 
-    payload = {"model": MODEL, "messages": messages}
+    payload = {"model": model_override or MODEL, "messages": messages}
     if tools:
         payload["tools"] = tools
 
