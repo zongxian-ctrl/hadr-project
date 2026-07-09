@@ -23,21 +23,35 @@ ENDPOINT = "https://opencode.ai/zen/go/v1/chat/completions"
 MODEL = os.environ.get("HARNESS_MODEL", "qwen3.7-max")
 
 
-def call_model(messages, tools=None):
+def _api_key():
+    """Prefer OPENCODE_API_KEY; otherwise read the key OpenCode already stored
+    when you ran `opencode auth login`, so the harness works with no setup."""
+    key = os.environ.get("OPENCODE_API_KEY")
+    if key:
+        return key
+    try:
+        auth = os.path.expanduser("~/.local/share/opencode/auth.json")
+        with open(auth, encoding="utf-8") as f:
+            return json.load(f).get("opencode-go", {}).get("key")
+    except Exception:
+        return None
+
+
+def call_model(messages, tools=None, model_override=None):
     """POST the conversation to the model; return the assistant's message dict.
 
     `messages` is the whole conversation so far (the model is stateless — the
     array IS the memory). `tools` is an optional list of tool schemas; when
     given, the reply may contain `tool_calls` instead of (or with) content.
     """
-    api_key = os.environ.get("OPENCODE_API_KEY")
+    api_key = _api_key()
     if not api_key:
         raise SystemExit(
-            "Set OPENCODE_API_KEY first. See harness/README.md for how to load "
-            "it from your OpenCode auth without printing it."
+            "No OpenCode key found. Set OPENCODE_API_KEY, or sign in with "
+            "`opencode auth login` so it can be read from your OpenCode config."
         )
 
-    payload = {"model": MODEL, "messages": messages}
+    payload = {"model": model_override or MODEL, "messages": messages}
     if tools:
         payload["tools"] = tools
 
